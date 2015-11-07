@@ -1,30 +1,53 @@
 require'ext'
-configFilename=os.getenv'HOME'..'/.http.lua.conf'
-mimes=assert(load('return '..(file[configFilename]or'')))()
+local configFilename = os.getenv'HOME'..'/.http.lua.conf'
+local mimes = assert(load('return '..(file[configFilename]or'')))()
 if not mimes then
-	mimes={}
+	mimes = {}
 	for _,source in pairs{'application','audio','image','message','model','multipart','text','video'}do
 		print('fetching '..source..' mime types...')
-		csv=require'csv'.string(assert(require'socket.http'.request('http://www.iana.org/assignments/media-types/'..source..'.csv')))
-		for i=2,#csv.rows do
-			row=csv.rows[i]
-			mimes[row[1]:lower()]=row[2]
+		local csv = require'csv'.string(assert(require'socket.http'.request('http://www.iana.org/assignments/media-types/'..source..'.csv')))
+		csv:setColumnNames(csv.rows:remove(1))
+		for _,row in ipairs(csv.rows) do
+			mimes[row.Name:lower()] = row.Template
 		end
 	end
-	file[configFilename]=tolua(mimes,{indent=true})
+	file[configFilename] = tolua(mimes,{indent = true})
 end
-port=port or 8000
-server=assert(require'socket'.bind('*',port))
-addr,port=server:getsockname()
+local port = port or 8000
+local server = assert(require'socket'.bind('*',port))
+local addr,port = server:getsockname()
 print('listening '..addr..':'..port) 
-while{}do
-	client=assert(server:accept())
+while true do
+	local client = assert(server:accept())
 	assert(client:settimeout(60))
-	request=client:receive()
-	filename=request and'./'..request:split'%s+'[2]
-	result=filename and file[filename]
-	_,ext=filename and io.getfileext(filename)
-	mime=ext and mimes[ext:lower()]
-	assert(client:send(result and(mime and'HTTP/1.1 200/OK\r\nContent-Type:'..mime..'\r\n\r\n'or'')..result or'HTTP/1.1 404 Not Found\r\n'))
+	local request = client:receive()
+	print('request',request)
+	local filename = request and request:split'%s+'[2]
+	print('filename',filename)
+	if filename then
+		local localfilename = './'..filename
+		local attr = lfs.attributes(localfilename)
+		if attr and attr.mode == 'directory' then
+			assert(client:send('HTTP/1.1 200/OK\r\nContent-Type:text/html\r\n\r\n'))
+			for file in lfs.dir(localfilename) do
+				local nextfilename = (filename..'/'..file):gsub('//', '/')
+				assert(client:send('<a href="'..nextfilename..'">'..file..'</a><br>\n'))
+			end
+		else
+			local result = file[localfilename]
+			if result then
+				local _,ext = io.getfileext(localfilename)
+				if ext then
+					local mime = mimes[ext:lower()]
+					if mime then
+						assert(client:send('HTTP/1.1 200/OK\r\nContent-Type:'..mime..'\r\n\r\n'))
+					end
+				end
+				assert(client:send(result))
+			else
+				assert(client:send('HTTP/1.1 404 Not Found\r\n'))
+			end
+		end
+	end
 	client:close()
 end
