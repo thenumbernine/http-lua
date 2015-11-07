@@ -22,30 +22,36 @@ while true do
 	assert(client:settimeout(60))
 	local request = client:receive()
 	print('request',request)
-	local filename = request and request:split'%s+'[2]
-	print('filename',filename)
-	if filename then
-		local localfilename = './'..filename
-		local attr = lfs.attributes(localfilename)
-		if attr and attr.mode == 'directory' then
-			assert(client:send('HTTP/1.1 200/OK\r\nContent-Type:text/html\r\n\r\n'))
-			for file in lfs.dir(localfilename) do
-				local nextfilename = (filename..'/'..file):gsub('//', '/')
-				assert(client:send('<a href="'..nextfilename..'">'..file..'</a><br>\n'))
-			end
-		else
-			local result = file[localfilename]
-			if result then
-				local _,ext = io.getfileext(localfilename)
-				if ext then
-					local mime = mimes[ext:lower()]
-					if mime then
-						assert(client:send('HTTP/1.1 200/OK\r\nContent-Type:'..mime..'\r\n\r\n'))
-					end
+	if request then
+		local method, filename, proto = request:split'%s+':unpack()
+		print('method',method)
+		print('filename',filename)
+		print('proto',proto)
+		local base, getargs = filename:match('(.-)%?(.*)')
+		filename = base or filename
+		if filename then
+			local localfilename = './'..filename
+			local attr = lfs.attributes(localfilename)
+			if attr and attr.mode == 'directory' then
+				assert(client:send('HTTP/1.1 200/OK\r\nContent-Type:text/html\r\n\r\n'))
+				for file in lfs.dir(localfilename) do
+					local nextfilename = (filename..'/'..file):gsub('//', '/')
+					assert(client:send('<a href="'..nextfilename..'">'..file..'</a><br>\n'))
 				end
-				assert(client:send(result))
 			else
-				assert(client:send('HTTP/1.1 404 Not Found\r\n'))
+				local result = file[localfilename]
+				if result then
+					local _,ext = io.getfileext(localfilename)
+					if ext then
+						local mime = mimes[ext:lower()]
+						if mime then
+							assert(client:send('HTTP/1.1 200/OK\r\nContent-Type:'..mime..'\r\n\r\n'))
+						end
+					end
+					assert(client:send(result))
+				else
+					assert(client:send('HTTP/1.1 404 Not Found\r\n'))
+				end
 			end
 		end
 	end
