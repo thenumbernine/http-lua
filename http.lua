@@ -21,7 +21,8 @@ if not mimes then
 end
 
 local port = port or 8000
-local server = assert(socket.bind('*',port))
+local addr = addr or '*'
+local server = assert(socket.bind(addr, port))
 local addr,port = server:getsockname()
 print('listening '..addr..':'..port) 
 while true do
