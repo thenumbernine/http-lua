@@ -1,7 +1,15 @@
 HTTP server
 
+depends on:
+lua-ext: https://github.com/thenumbernine/lua-ext
+lua-csv: https://github.com/thenumbernine/lua-csv
+
 usage:
+make sure your LUA_PATH points to the directory containing http.lua (and the lua-ext project it depends on) and run:
 lua -lhttp
+
+alternatively you can explicitly invoke the file via:
+lua path/to/http.lua
 
 to set the port manually:
 lua -e "port=80" -lhttp

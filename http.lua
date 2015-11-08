@@ -1,11 +1,15 @@
 require'ext'
+local CSV = require'csv'
+local socket = require'socket'
+local http = require 'socket.http'
+local url = require 'socket.url'
 local configFilename = os.getenv'HOME'..'/.http.lua.conf'
 local mimes = assert(load('return '..(file[configFilename]or'')))()
 if not mimes then
 	mimes = {}
 	for _,source in pairs{'application','audio','image','message','model','multipart','text','video'}do
 		print('fetching '..source..' mime types...')
-		local csv = require'csv'.string(assert(require'socket.http'.request('http://www.iana.org/assignments/media-types/'..source..'.csv')))
+		local csv = CSV.string(assert(http.request('http://www.iana.org/assignments/media-types/'..source..'.csv')))
 		csv:setColumnNames(csv.rows:remove(1))
 		for _,row in ipairs(csv.rows) do
 			mimes[row.Name:lower()] = row.Template
@@ -13,8 +17,9 @@ if not mimes then
 	end
 	file[configFilename] = tolua(mimes,{indent = true})
 end
+
 local port = port or 8000
-local server = assert(require'socket'.bind('*',port))
+local server = assert(socket.bind('*',port))
 local addr,port = server:getsockname()
 print('listening '..addr..':'..port) 
 while true do
@@ -27,6 +32,7 @@ while true do
 		print('method',method)
 		print('filename',filename)
 		print('proto',proto)
+		filename = url.unescape(filename:gsub('%+','%%20')) 
 		local base, getargs = filename:match('(.-)%?(.*)')
 		filename = base or filename
 		if filename then
