@@ -1,8 +1,10 @@
-require'ext'
-local CSV = require'csv'
+local lfs = require 'lfs'
 local socket = require'socket'
 local http = require 'socket.http'
 local url = require 'socket.url'
+local CSV = require'csv'
+require'ext'
+
 local configFilename = os.getenv'HOME'..'/.http.lua.conf'
 local mimes = assert(load('return '..(file[configFilename]or'')))()
 if not mimes then
@@ -26,12 +28,8 @@ while true do
 	local client = assert(server:accept())
 	assert(client:settimeout(60))
 	local request = client:receive()
-	print('request',request)
 	if request then
 		local method, filename, proto = request:split'%s+':unpack()
-		print('method',method)
-		print('filename',filename)
-		print('proto',proto)
 		filename = url.unescape(filename:gsub('%+','%%20')) 
 		local base, getargs = filename:match('(.-)%?(.*)')
 		filename = base or filename
