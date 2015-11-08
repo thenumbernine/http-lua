@@ -1,0 +1,12 @@
+HTTP server
+
+usage:
+lua -lhttp
+
+to set the port manually:
+lua -e "port=80" -lhttp
+
+- uses port 8000 by default.
+- runs out of the working directory
+- provides directory listings
+- caches mime types from iana.org into the file ~/.http.lua.conf
