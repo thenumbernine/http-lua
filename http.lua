@@ -29,58 +29,81 @@ while true do
 	local client = assert(server:accept())
 	assert(client:settimeout(60))
 	local request = client:receive()
-	if request then
-		local method, filename, proto = request:split'%s+':unpack()
-		filename = url.unescape(filename:gsub('%+','%%20')) 
-		local base, getargs = filename:match('(.-)%?(.*)')
-		filename = base or filename
-		if filename then
-			local localfilename = './'..filename
-			local attr = lfs.attributes(localfilename)
-			if attr and attr.mode == 'directory' then
-				assert(client:send('HTTP/1.1 200/OK\r\nContent-Type:text/html\r\n\r\n'))
-				assert(client:send('<h3>Index of '..filename..'</h3>\n'))
-				assert(client:send('<html>\n'))
-				assert(client:send('<head>\n'))
-				assert(client:send('<title>Directory Listing of '..filename..'</title>\n'))
-				assert(client:send('<style type="text/css"> td{padding-right:20px};</style>\n'))
-				assert(client:send('</head>\n'))
-				assert(client:send('<body>\n'))
-				assert(client:send('<table>\n'))
-				assert(client:send('<tr><th>Name</th><th>Modified</th><th>Size</th></tr>\n'))
-				for file in lfs.dir(localfilename) do
-					if file ~= '.' then
-						local nextfilename = (filename..'/'..file):gsub('//', '/')
-						local displayfile = file
-						local subattr = lfs.attributes(localfilename..'/'..file)
-						if subattr and subattr.mode == 'directory' then
-							displayfile = '[' .. displayfile .. ']'
+	if not request then
+		print('connection timed out')
+	else
+		xpcall(function()
+			print('got request',request)
+			local method, filename, proto = request:split'%s+':unpack()
+			filename = url.unescape(filename:gsub('%+','%%20')) 
+			local base, getargs = filename:match('(.-)%?(.*)')
+			filename = base or filename
+			if filename then
+				local localfilename = './'..filename
+				local attr = lfs.attributes(localfilename)
+				if attr and attr.mode == 'directory' then
+					print('serving directory',filename)
+					assert(client:send(
+						'HTTP/1.1 200/OK\r\n'
+						..'Content-Type:text/html\r\n'
+						..'Cache-Control: no-cache, no-store, must-revalidate\r\n'
+						..'Pragma: no-cache\r\n'
+						..'Expires: 0\r\n'
+						..'\r\n'
+						..'<h3>Index of '..filename..'</h3>\n'
+						..'<html>\n'
+						..'<head>\n'
+						..'<title>Directory Listing of '..filename..'</title>\n'
+						..'<style type="text/css"> td{padding-right:20px};</style>\n'
+						..'</head>\n'
+						..'<body>\n'
+						..'<table>\n'
+						..'<tr><th>Name</th><th>Modified</th><th>Size</th></tr>\n'))
+					for file in lfs.dir(localfilename) do
+						if file ~= '.' then
+							local nextfilename = (filename..'/'..file):gsub('//', '/')
+							local displayfile = file
+							local subattr = lfs.attributes(localfilename..'/'..file)
+							if subattr and subattr.mode == 'directory' then
+								displayfile = '[' .. displayfile .. ']'
+							end
+							assert(client:send(
+								'<tr>'
+								..'<td><a href="'..nextfilename..'">'..displayfile..'</a></td>'
+								..'<td>'..(subattr and os.date('%F %T',subattr.modification) or '')..'</td>'
+								..'<td style="text-align:center">'..(subattr and (subattr.mode == 'directory' and '-' or subattr.size) or '')..'</td>'
+								..'</tr>\n'))
 						end
-						assert(client:send('<tr>'))
-						assert(client:send('<td><a href="'..nextfilename..'">'..displayfile..'</a></td>'))
-						assert(client:send('<td>'..(subattr and os.date('%F %T',subattr.modification) or '')..'</td>'))
-						assert(client:send('<td style="text-align:center">'..(subattr and (subattr.mode == 'directory' and '-' or subattr.size) or '')..'</td>'))
-						assert(client:send('</tr>\n'))
 					end
-				end
-				assert(client:send('</table>\n'))
-				assert(client:send('</body>\n'))
-			else
-				local result = file[localfilename]
-				if result then
-					local _,ext = io.getfileext(localfilename)
-					if ext then
-						local mime = mimes[ext:lower()]
-						if mime then
-							assert(client:send('HTTP/1.1 200/OK\r\nContent-Type:'..mime..'\r\n\r\n'))
-						end
-					end
-					assert(client:send(result))
+					assert(client:send(
+						'</table>\n'
+						..'</body>\n'))
 				else
-					assert(client:send('HTTP/1.1 404 Not Found\r\n'))
+					print('serving file',filename)
+					local result = file[localfilename]
+					if result then
+						local _,ext = io.getfileext(localfilename)
+						if ext then
+							local mime = mimes[ext:lower()]
+							if mime then
+								assert(client:send(
+									'HTTP/1.1 200/OK\r\n'
+									..'Content-Type:'..mime..'\r\n'
+									..'Cache-Control: no-cache, no-store, must-revalidate\r\n'
+									..'Pragma: no-cache\r\n'
+									..'Expires: 0\r\n'
+									..'\r\n'))
+							end
+						end
+						assert(client:send(result))
+					else
+						assert(client:send('HTTP/1.1 404 Not Found\r\n'))
+					end
 				end
 			end
-		end
+		end, function(err)
+			io.stderr:write(err..debug.traceback()..'\n')
+		end)
 	end
 	client:close()
 end
