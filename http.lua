@@ -17,13 +17,14 @@ if not mimes then
 			mimes[row.Name:lower()] = row.Template
 		end
 	end
-	file[configFilename] = tolua(mimes,{indent = true})
-end
 
--- well this is strange
-if not mimes.js then
-	print('what did iana do with the js extension?!!!')
-	mimes.js = mimes.javascript
+	-- well this is strange
+	if not mimes.js then
+		print('what did iana do with the js extension?!!!')
+		mimes.js = mimes.javascript
+	end
+	
+	file[configFilename] = tolua(mimes,{indent = true})
 end
 
 local port = port or 8000
