@@ -9,7 +9,7 @@ local configFilename = os.getenv'HOME'..'/.http.lua.conf'
 local mimes = assert(load('return '..(file[configFilename]or'')))()
 if not mimes then
 	mimes = {}
-	for _,source in pairs{'application','audio','image','message','model','multipart','text','video'}do
+	for _,source in pairs{'application','audio','image','message','model','multipart','text','video'} do
 		print('fetching '..source..' mime types...')
 		local csv = CSV.string(assert(http.request('http://www.iana.org/assignments/media-types/'..source..'.csv')))
 		csv:setColumnNames(csv.rows:remove(1))
@@ -20,11 +20,17 @@ if not mimes then
 	file[configFilename] = tolua(mimes,{indent = true})
 end
 
+-- well this is strange
+if not mimes.js then
+	print('what did iana do with the js extension?!!!')
+	mimes.js = mimes.javascript
+end
+
 local port = port or 8000
 local addr = addr or '*'
 local server = assert(socket.bind(addr, port))
 local addr,port = server:getsockname()
-print('listening '..addr..':'..port) 
+print('listening '..addr..':'..port)
 while true do
 	local client = assert(server:accept())
 	assert(client:settimeout(60))
@@ -35,7 +41,7 @@ while true do
 		xpcall(function()
 			print('got request',request)
 			local method, filename, proto = request:split'%s+':unpack()
-			filename = url.unescape(filename:gsub('%+','%%20')) 
+			filename = url.unescape(filename:gsub('%+','%%20'))
 			local base, getargs = filename:match('(.-)%?(.*)')
 			filename = base or filename
 			if filename then
