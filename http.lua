@@ -91,16 +91,14 @@ while true do
 					if result then
 						local _,ext = io.getfileext(localfilename)
 						if ext then
-							local mime = mimes[ext:lower()]
-							if mime then
-								assert(client:send(
-									'HTTP/1.1 200/OK\r\n'
-									..'Content-Type:'..mime..'\r\n'
-									..'Cache-Control: no-cache, no-store, must-revalidate\r\n'
-									..'Pragma: no-cache\r\n'
-									..'Expires: 0\r\n'
-									..'\r\n'))
-							end
+							local mime = mimes[ext:lower()] or 'application/octet-stream'
+							assert(client:send(
+								'HTTP/1.1 200/OK\r\n'
+								..'Content-Type:'..mime..'\r\n'
+								..'Cache-Control: no-cache, no-store, must-revalidate\r\n'
+								..'Pragma: no-cache\r\n'
+								..'Expires: 0\r\n'
+								..'\r\n'))
 						end
 						assert(client:send(result))
 					else
