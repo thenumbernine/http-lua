@@ -66,11 +66,16 @@ while true do
 						..'<body>\n'
 						..'<table>\n'
 						..'<tr><th>Name</th><th>Modified</th><th>Size</th></tr>\n'))
-					for file in lfs.dir(localfilename) do
-						if file ~= '.' then
-							local nextfilename = (filename..'/'..file):gsub('//', '/')
-							local displayfile = file
-							local subattr = lfs.attributes(localfilename..'/'..file)
+					local files = table()
+					for f in lfs.dir(localfilename) do
+						files:insert(f)
+					end
+					files:sort(function (a,b) return a:lower() < b:lower() end)
+					for _,f in ipairs(files) do
+						if f ~= '.' then
+							local nextfilename = (filename..'/'..f):gsub('//', '/')
+							local displayfile = f
+							local subattr = lfs.attributes(localfilename..'/'..f)
 							if subattr and subattr.mode == 'directory' then
 								displayfile = '[' .. displayfile .. ']'
 							end
