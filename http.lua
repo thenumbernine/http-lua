@@ -27,93 +27,131 @@ if not mimes then
 	file[configFilename] = tolua(mimes,{indent = true})
 end
 
+local function getn(...)
+	return table({...}, {n=select('#', ...)})
+end
+
 local port = port or 8000
 local addr = addr or '*'
 local server = assert(socket.bind(addr, port))
+local clients = table()
+--[[ blocking
+assert(server:settimeout(3600))
+--server:setoption('keepalive',true)
+--server:setoption('linger',{on=true,timeout=3600})
+--]]
+-- [[ non-blocking
+assert(server:settimeout(0,'b'))
+--]]
 local addr,port = server:getsockname()
 print('listening '..addr..':'..port)
-while true do
+while true do	
+--[[ blocking
+	print'waiting for client...'	
 	local client = assert(server:accept())
-	assert(client:settimeout(60))
-	local request = client:receive()
-	if not request then
-		print('connection timed out')
-	else
-		xpcall(function()
-			print('got request',request)
-			local method, filename, proto = request:split'%s+':unpack()
-			filename = url.unescape(filename:gsub('%+','%%20'))
-			local base, getargs = filename:match('(.-)%?(.*)')
-			filename = base or filename
-			if filename then
-				local localfilename = './'..filename
-				local attr = lfs.attributes(localfilename)
-				if attr and attr.mode == 'directory' then
-					print('serving directory',filename)
-					assert(client:send(
-						'HTTP/1.1 200/OK\r\n'
-						..'Content-Type:text/html\r\n'
-						..'Cache-Control: no-cache, no-store, must-revalidate\r\n'
-						..'Pragma: no-cache\r\n'
-						..'Expires: 0\r\n'
-						..'\r\n'
-						..'<h3>Index of '..filename..'</h3>\n'
-						..'<html>\n'
-						..'<head>\n'
-						..'<title>Directory Listing of '..filename..'</title>\n'
-						..'<style type="text/css"> td{padding-right:20px};</style>\n'
-						..'</head>\n'
-						..'<body>\n'
-						..'<table>\n'
-						..'<tr><th>Name</th><th>Modified</th><th>Size</th></tr>\n'))
-					local files = table()
-					for f in lfs.dir(localfilename) do
-						files:insert(f)
-					end
-					files:sort(function (a,b) return a:lower() < b:lower() end)
-					for _,f in ipairs(files) do
-						if f ~= '.' then
-							local nextfilename = (filename..'/'..f):gsub('//', '/')
-							local displayfile = f
-							local subattr = lfs.attributes(localfilename..'/'..f)
-							if subattr and subattr.mode == 'directory' then
-								displayfile = '[' .. displayfile .. ']'
+	print'got client!'	
+	assert(client:settimeout(3600,'b'))
+	clients:insert(client)
+--]]
+-- [[ non-blocking
+	local client = server:accept()
+	if client then
+		assert(client:settimeout(0,'b'))
+		assert(client:setoption('keepalive',true))
+		print'got client!'
+		clients:insert(client)
+	end
+--]]
+	for i=#clients,1,-1 do
+		local client = clients[i]
+	
+		local t = getn(client:receive())
+		local request = t[1]
+		if not request then
+			if t[2] ~= 'timeout' then
+				print('connection failed:',t:unpack(1,t.n))
+				clients:remove(i)
+			end
+		else
+			xpcall(function()
+				print('got request',request)
+				local method, filename, proto = request:split'%s+':unpack()
+				filename = url.unescape(filename:gsub('%+','%%20'))
+				local base, getargs = filename:match('(.-)%?(.*)')
+				filename = base or filename
+				if filename then
+					local localfilename = './'..filename
+					local attr = lfs.attributes(localfilename)
+					if attr and attr.mode == 'directory' then
+						print('serving directory',filename)
+						assert(client:send(
+							'HTTP/1.1 200/OK\r\n'
+							..'Content-Type:text/html\r\n'
+							..'Cache-Control: no-cache, no-store, must-revalidate\r\n'
+							..'Pragma: no-cache\r\n'
+							..'Expires: 0\r\n'
+							..'\r\n'
+							..'<h3>Index of '..filename..'</h3>\n'
+							..'<html>\n'
+							..'<head>\n'
+							..'<title>Directory Listing of '..filename..'</title>\n'
+							..'<style type="text/css"> td{padding-right:20px};</style>\n'
+							..'</head>\n'
+							..'<body>\n'
+							..'<table>\n'
+							..'<tr><th>Name</th><th>Modified</th><th>Size</th></tr>\n'))
+						local files = table()
+						for f in lfs.dir(localfilename) do
+							files:insert(f)
+						end
+						files:sort(function (a,b) return a:lower() < b:lower() end)
+						for _,f in ipairs(files) do
+							if f ~= '.' then
+								local nextfilename = (filename..'/'..f):gsub('//', '/')
+								local displayfile = f
+								local subattr = lfs.attributes(localfilename..'/'..f)
+								if subattr and subattr.mode == 'directory' then
+									displayfile = '[' .. displayfile .. ']'
+								end
+								assert(client:send(
+									'<tr>'
+									..'<td><a href="'..nextfilename..'">'..displayfile..'</a></td>'
+									..'<td>'..(subattr and os.date('%F %T',subattr.modification) or '')..'</td>'
+									..'<td style="text-align:center">'..(subattr and (subattr.mode == 'directory' and '-' or subattr.size) or '')..'</td>'
+									..'</tr>\n'))
 							end
-							assert(client:send(
-								'<tr>'
-								..'<td><a href="'..nextfilename..'">'..displayfile..'</a></td>'
-								..'<td>'..(subattr and os.date('%F %T',subattr.modification) or '')..'</td>'
-								..'<td style="text-align:center">'..(subattr and (subattr.mode == 'directory' and '-' or subattr.size) or '')..'</td>'
-								..'</tr>\n'))
 						end
-					end
-					assert(client:send(
-						'</table>\n'
-						..'</body>\n'))
-				else
-					print('serving file',filename)
-					local result = file[localfilename]
-					if result then
-						local _,ext = io.getfileext(localfilename)
-						if ext then
-							local mime = mimes[ext:lower()] or 'application/octet-stream'
-							assert(client:send(
-								'HTTP/1.1 200/OK\r\n'
-								..'Content-Type:'..mime..'\r\n'
-								..'Cache-Control: no-cache, no-store, must-revalidate\r\n'
-								..'Pragma: no-cache\r\n'
-								..'Expires: 0\r\n'
-								..'\r\n'))
-						end
-						assert(client:send(result))
+						assert(client:send(
+							'</table>\n'
+							..'</body>\n'))
 					else
-						assert(client:send('HTTP/1.1 404 Not Found\r\n'))
+						local result = file[localfilename]
+						if result then
+							print('serving file',filename)
+							local _,ext = io.getfileext(localfilename)
+							if ext then
+								local mime = mimes[ext:lower()] or 'application/octet-stream'
+								assert(client:send(
+									'HTTP/1.1 200/OK\r\n'
+									..'Content-Type:'..mime..'\r\n'
+									..'Cache-Control: no-cache, no-store, must-revalidate\r\n'
+									..'Pragma: no-cache\r\n'
+									..'Expires: 0\r\n'
+									..'\r\n'))
+							end
+							assert(client:send(result))
+						else
+							print('failed to find file',filename)
+							assert(client:send('HTTP/1.1 404 Not Found\r\n'))
+						end
 					end
 				end
-			end
-		end, function(err)
-			io.stderr:write(err..debug.traceback()..'\n')
-		end)
+				print'closed client!'	
+				client:close()
+				clients:remove(i)	
+			end, function(err)
+				io.stderr:write(err..debug.traceback()..'\n')
+			end)
+		end
 	end
-	client:close()
 end
