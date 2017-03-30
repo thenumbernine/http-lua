@@ -31,37 +31,46 @@ local function getn(...)
 	return table({...}, {n=select('#', ...)})
 end
 
+-- I had some trouble with blocking and MathJax on android.  Maybe it was my imagination.
+local block
+if _G.block ~= nil then 
+	block = _G.block 
+else
+	block = true
+end
+
 local port = port or 8000
 local addr = addr or '*'
 local server = assert(socket.bind(addr, port))
 local clients = table()
---[[ blocking
-assert(server:settimeout(3600))
---server:setoption('keepalive',true)
---server:setoption('linger',{on=true,timeout=3600})
---]]
--- [[ non-blocking
-assert(server:settimeout(0,'b'))
---]]
+if block then
+	assert(server:settimeout(3600))
+	--server:setoption('keepalive',true)
+	--server:setoption('linger',{on=true,timeout=3600})
+else
+	assert(server:settimeout(0,'b'))
+end
 local addr,port = server:getsockname()
 print('listening '..addr..':'..port)
 while true do	
---[[ blocking
-	print'waiting for client...'	
-	local client = assert(server:accept())
-	print'got client!'	
-	assert(client:settimeout(3600,'b'))
-	clients:insert(client)
---]]
--- [[ non-blocking
-	local client = server:accept()
-	if client then
-		assert(client:settimeout(0,'b'))
-		assert(client:setoption('keepalive',true))
-		print'got client!'
+	local client
+	if block then
+		print'waiting for client...'	
+		client = assert(server:accept())
+		print'got client!'	
+		assert(client:settimeout(3600,'b'))
 		clients:insert(client)
+		print('total #clients',#clients)
+	else
+		client = server:accept()
+		if client then
+			assert(client:settimeout(0,'b'))
+			assert(client:setoption('keepalive',true))
+			print'got client!'
+			clients:insert(client)
+			print('total #clients',#clients)
+		end
 	end
---]]
 	for i=#clients,1,-1 do
 		local client = clients[i]
 	
