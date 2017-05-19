@@ -48,7 +48,7 @@ local addr = addr or '*'
 local server = assert(socket.bind(addr, port))
 local clients = table()
 if block then
-	assert(server:settimeout(3600))
+	--assert(server:settimeout(3600))
 	--server:setoption('keepalive',true)
 	--server:setoption('linger',{on=true,timeout=3600})
 else
@@ -191,12 +191,12 @@ while true do
 					end
 					assert(lfs.chdir(cwd))
 				end
-				print'closing client...'	
-				client:close()
-				clients:remove(i)
 			end, function(err)
 				io.stderr:write(err..debug.traceback()..'\n')
 			end)
 		end
+		print'closing client...'	
+		client:close()
+		clients:remove(i)
 	end
 end
