@@ -19,6 +19,9 @@ lua -e "port=80" -lhttp
 to set the interface manually (defaults to *, which sometimes doesn't work):
 lua -e "addr='10.0.0.1'" -lhttp
 
+to use non-blocking clients:
+lua -e "block=false" -lhttp
+
 wsapi simulation is enabled by default
 to disable wsapi simulation:
 lua -e "wsapi=false" -lhttp
