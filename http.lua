@@ -144,15 +144,22 @@ while true do
 					else
 						local result = file[localfilename]
 						if not result then
+print('...failed to find file at',localfilename)							
 							status = '404 Not Found'
 							callback = coroutine.wrap(function()
 								coroutine.yield('failed to find file '..filename)
 							end)
 						else
 							local _,ext = io.getfileext(localfilename)
-							if wsapi and ext=='lua' then
+							local dir, _ = io.getfiledir(localfilename)
+print('wsapi',wsapi)
+print('ext',ext)
+print('dontinterpret?', io.fileexists(dir..'/.dontinterpret'))
+							if wsapi 
+							and ext=='lua' 
+							and not io.fileexists(dir..'/.dontinterpret')
+							then
 								print('running script',filename)
-								local dir, _ = io.getfiledir(localfilename)
 								assert(lfs.chdir(dir))
 								local sandboxenv = setmetatable({}, {__index=_ENV})
 								local fn = assert(load(result, localfilename, 'bt', sandboxenv))()
