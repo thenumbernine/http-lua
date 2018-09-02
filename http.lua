@@ -2,28 +2,13 @@ local lfs = require 'lfs'
 local socket = require'socket'
 local http = require 'socket.http'
 local url = require 'socket.url'
-require'ext'
+local MIMETypes = require 'mimetypes'
+require 'ext'
 
+-- allow -e 'config=...'
 local config = config or (os.getenv'HOME' or os.getenv'USERPROFILE')..'/.http.lua.conf'
-local mimes = assert(load('return '..(file[config]or'')))()
-if not mimes then
-	local CSV = require'csv'
-	mimes = {}
-	for _,source in pairs{'application','audio','image','message','model','multipart','text','video'} do
-		print('fetching '..source..' mime types...')
-		local csv = CSV.string(assert(http.request('http://www.iana.org/assignments/media-types/'..source..'.csv')))
-		csv:setColumnNames(csv.rows:remove(1))
-		for _,row in ipairs(csv.rows) do
-			mimes[row.Name:lower()] = row.Template
-		end
-	end
-	mimes.js = mimes.js or mimes.javascript -- well this is strange
-	file[config] = tolua(mimes,{indent = true})
-end
 
-local function getn(...)
-	return table({...}, {n=select('#', ...)})
-end
+local mime = MIMETypes(config)
 
 -- whether to simulate wsapi for .lua pages
 local wsapi = true
@@ -34,13 +19,10 @@ if wsapi then
 	}
 end
 
+-- use blocking by default.
 -- I had some trouble with blocking and MathJax on android.  Maybe it was my imagination.
 local block
-if _G.block ~= nil then 
-	block = _G.block 
-else
-	block = true
-end
+if _G.block ~= nil then block = _G.block else block = true end
  
 local cwd = lfs.currentdir()
 local port = port or 8000
@@ -78,7 +60,7 @@ while true do
 	end
 	for j=#clients,1,-1 do
 		client = clients[j]	
-		local t = getn(client:receive())
+		local t = table.getn(client:receive())
 		local request = t[1]
 		if not request then
 			if t[2] ~= 'timeout' then
@@ -177,7 +159,7 @@ print('dontinterpret?', io.fileexists(dir..'/.dontinterpret'))
 							else
 								print('serving file',filename)
 								status = '200/OK'
-								headers['content-type'] = ext and mimes[ext:lower()] or 'application/octet-stream'
+								headers['content-type'] = ext and mime.types[ext:lower()] or 'application/octet-stream'
 								callback = coroutine.wrap(function()
 									coroutine.yield(io.readfile(localfilename))
 								end)
