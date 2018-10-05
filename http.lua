@@ -60,7 +60,7 @@ while true do
 	end
 	for j=#clients,1,-1 do
 		client = clients[j]	
-		local t = table.getn(client:receive())
+		local t = table.pack(client:receive())
 		local request = t[1]
 		if not request then
 			if t[2] ~= 'timeout' then
