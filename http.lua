@@ -10,21 +10,43 @@ local config = config or (os.getenv'HOME' or os.getenv'USERPROFILE')..'/.http.lu
 
 local mime = MIMETypes(config)
 
+local docroot = lfs.currentdir()
+
 -- whether to simulate wsapi for .lua pages
 local wsapi = true
 if _G.wsapi ~= nil then wsapi = _G.wsapi end
 if wsapi then
 	package.loaded['wsapi.request'] = {
-		new = function(env) return env end,
+		new = function(env) 
+			env = env or {}
+			env.doc_root = docroot
+			return env
+		end,
 	}
 end
+
+local function findDontInterpret(docroot, remotePath)
+	local localPath = docroot .. remotePath
+	local dir = io.getfiledir(localPath)
+	local docrootparts = docroot:split('/')
+	local dirparts = dir:split('/')
+	for i=1,#docrootparts do
+		assert(docrootparts[i] == dirparts[i])
+	end
+	for i=#dirparts,#docrootparts,-1 do
+		local check = table.concat({table.unpack(dirparts,1,i)}, '/')
+		if io.fileexists(check..'/.dontinterpret') then
+			return true
+		end
+	end
+end
+
 
 -- use blocking by default.
 -- I had some trouble with blocking and MathJax on android.  Maybe it was my imagination.
 local block
 if _G.block ~= nil then block = _G.block else block = true end
  
-local cwd = lfs.currentdir()
 local port = port or 8000
 local addr = addr or '*'
 local server = assert(socket.bind(addr, port))
@@ -81,7 +103,7 @@ while true do
 						['expires'] = '0',
 					}
 					local callback
-					local localfilename = './'..filename
+					local localfilename = ('./'..filename):gsub('/+', '/')
 					local attr = lfs.attributes(localfilename)
 					if attr and attr.mode == 'directory' then
 						print('serving directory',filename)
@@ -126,7 +148,7 @@ while true do
 					else
 						local result = file[localfilename]
 						if not result then
-print('...failed to find file at',localfilename)							
+print('from dir '..lfs.currentdir()..' failed to find file at', localfilename)
 							status = '404 Not Found'
 							callback = coroutine.wrap(function()
 								coroutine.yield('failed to find file '..filename)
@@ -136,15 +158,32 @@ print('...failed to find file at',localfilename)
 							local dir, _ = io.getfiledir(localfilename)
 print('wsapi',wsapi)
 print('ext',ext)
-print('dontinterpret?', io.fileexists(dir..'/.dontinterpret'))
-							if wsapi 
-							and ext=='lua' 
-							and not io.fileexists(dir..'/.dontinterpret')
+							local dontinterpret = findDontInterpret(docroot, filename)
+print('dontinterpret?', dontinterpret)
+							if wsapi and (
+								localfilename:sub(-9) == '.html.lua'
+								or localfilename:sub(-7) == '.js.lua'
+							) then
+								print('running templated script',filename)
+assert(lfs.chdir(dir))
+								status = '200/OK'
+								headers['content-type'] = mime.types.html
+								callback = coroutine.wrap(function()
+									coroutine.yield(require 'template'(result))
+								end)							
+							elseif wsapi 
+							and ext == 'lua' 
+							and not dontinterpret
 							then
 								print('running script',filename)
 								assert(lfs.chdir(dir))
 								local sandboxenv = setmetatable({}, {__index=_ENV})
-								local fn = assert(load(result, localfilename, 'bt', sandboxenv))()
+								local f, err = load(result, localfilename, 'bt', sandboxenv)
+								if not f then 
+									io.stderr:write(require 'template.showcode'(result),'\n')
+									error(err) 
+								end
+								local fn = assert(f())
 								local headers2
 								status, headers2, callback = fn.run{
 									GET = (getargs or''):split'&':map(function(kv)
@@ -178,11 +217,11 @@ print('dontinterpret?', io.fileexists(dir..'/.dontinterpret'))
 					else
 						assert(client:send[[someone forgot to set a callback!]])
 					end
-					assert(lfs.chdir(cwd))
 				end
 			end, function(err)
-				io.stderr:write(err..debug.traceback()..'\n')
+				io.stderr:write(err..'\n'..debug.traceback()..'\n')
 			end)
+			assert(lfs.chdir(docroot))
 		end
 		print'closing client...'	
 		client:close()
