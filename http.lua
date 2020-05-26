@@ -3,7 +3,10 @@ local socket = require'socket'
 local http = require 'socket.http'
 local url = require 'socket.url'
 local MIMETypes = require 'mimetypes'
-require 'ext'
+local table = require 'ext.table'
+local string = require 'ext.string'
+local os = require 'ext.os'
+local io = require 'ext.io'
 
 -- allow -e 'config=...'
 local config = config or (os.getenv'HOME' or os.getenv'USERPROFILE')..'/.http.lua.conf'
@@ -28,8 +31,8 @@ end
 local function findDontInterpret(docroot, remotePath)
 	local localPath = docroot .. remotePath
 	local dir = io.getfiledir(localPath)
-	local docrootparts = docroot:split('/')
-	local dirparts = dir:split('/')
+	local docrootparts = string.split(docroot, '/')
+	local dirparts = string.split(dir, '/')
 	for i=1,#docrootparts do
 		assert(docrootparts[i] == dirparts[i])
 	end
@@ -82,16 +85,61 @@ while true do
 	end
 	for j=#clients,1,-1 do
 		client = clients[j]	
-		local t = table.pack(client:receive())
-		local request = t[1]
-		if not request then
-			if t[2] ~= 'timeout' then
-				print('connection failed:',t:unpack(1,t.n))
+		local function readline()
+			local t = table.pack(client:receive())
+			print('got line', t:unpack(1,t.n))
+			if not t[1] then
+				--if t[2] ~= 'timeout' then
+					print('connection failed:',t:unpack(1,t.n))
+				--end
 			end
-		else
+			return t:unpack(1,t.n)
+		end
+		local request = readline()
+		if request then
 			xpcall(function()
 				print('got request',request)
-				local method, filename, proto = request:split'%s+':unpack()
+				local method, filename, proto = string.split(request, '%s+'):unpack()
+				
+				local POST
+				local reqHeaders
+-- [[
+				if method:lower() == 'post' then
+					reqHeaders = {}
+					while true do
+						local line = readline()
+						if not line then break end
+						line = string.trim(line)
+						if line == '' then 
+							print'done reading header'
+							break 
+						end
+						local k,v = line:match'^(.-):(.*)$'
+						if not k then
+							print("got invalid header line: "..line)
+							break
+						end
+						reqHeaders[k:lower()] = v
+					end
+					
+					local postLen = tonumber(reqHeaders['content-length'])
+					if not postLen then
+						print"didn't get POST data length"
+					else
+						print('reading POST '..postLen..' bytes')
+						--local postData = readline()
+						local postData = client:receive(postLen)
+						print('read POST data: '..postData)
+						POST = string.split(postData, '&'):mapi(function(kv, _, t)
+							local k, v = kv:match'([^=]*)=(.*)'
+							if not v then k,v = kv, #t+1 end
+							return v, k
+						end):map(function(v,k)
+							return url.unescape(v), url.unescape(k)
+						end)
+					end
+				end
+--]]
 				filename = url.unescape(filename:gsub('%+','%%20'))
 				local base, getargs = filename:match('(.-)%?(.*)')
 				filename = base or filename
@@ -146,7 +194,7 @@ while true do
 								..'</body>\n')
 						end)
 					else
-						local result = file[localfilename]
+						local result = io.readfile(localfilename)
 						if not result then
 print('from dir '..lfs.currentdir()..' failed to find file at', localfilename)
 							status = '404 Not Found'
@@ -177,6 +225,12 @@ assert(lfs.chdir(dir))
 							then
 								print('running script',filename)
 								assert(lfs.chdir(dir))
+							
+								-- trim off the linux executable stuff that lua interpreter usually does for me
+								if result:sub(1,2) == '#!' then
+									result = result:match'^[^\n]*\n(.*)$'
+								end
+								
 								local sandboxenv = setmetatable({}, {__index=_ENV})
 								local f, err = load(result, localfilename, 'bt', sandboxenv)
 								if not f then 
@@ -186,11 +240,15 @@ assert(lfs.chdir(dir))
 								local fn = assert(f())
 								local headers2
 								status, headers2, callback = fn.run{
-									GET = (getargs or''):split'&':map(function(kv)
+									reqHeaders = reqHeaders,
+									GET = string.split(getargs or'', '&'):map(function(kv, _, t)
 										local k, v = kv:match('([^=]*)=(.*)')
-										if not v then k,v = kv, true end
+										if not v then k,v = kv, #t+1 end
 										return v, k
-									end)
+									end):map(function(v,k)
+										return url.unescape(v), url.unescape(k)
+									end),
+									POST = POST,
 								}
 								headers2 = table.map(headers2, function(v,k) return v, k:lower() end)
 								headers = setmetatable(table(headers, headers2), nil)
@@ -222,6 +280,7 @@ assert(lfs.chdir(dir))
 				io.stderr:write(err..'\n'..debug.traceback()..'\n')
 			end)
 			assert(lfs.chdir(docroot))
+			print('collectgarbage', collectgarbage())
 		end
 		print'closing client...'	
 		client:close()
