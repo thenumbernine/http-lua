@@ -133,9 +133,10 @@ while true do
 						POST = string.split(postData, '&'):mapi(function(kv, _, t)
 							local k, v = kv:match'([^=]*)=(.*)'
 							if not v then k,v = kv, #t+1 end
+--print('before unescape, k='..k..' v='..v)							
+							k, v = url.unescape(k), url.unescape(v)
+--print('after unescape, k='..k..' v='..v)							
 							return v, k
-						end):map(function(v,k)
-							return url.unescape(v), url.unescape(k)
 						end)
 					end
 				end
@@ -244,9 +245,8 @@ assert(lfs.chdir(dir))
 									GET = string.split(getargs or'', '&'):map(function(kv, _, t)
 										local k, v = kv:match('([^=]*)=(.*)')
 										if not v then k,v = kv, #t+1 end
+										k, v = url.unescape(k), url.unescape(v)
 										return v, k
-									end):map(function(v,k)
-										return url.unescape(v), url.unescape(k)
 									end),
 									POST = POST,
 								}
@@ -263,17 +263,23 @@ assert(lfs.chdir(dir))
 							end
 						end
 					end
-					assert(client:send('HTTP/1.1 '..status..'\r\n'))
-					for k,v in pairs(headers) do
-						assert(client:send(k..': '..v..'\r\n'))
+					local function send(s)
+--io.write('sending '..s)
+						return client:send(s)
 					end
-					assert(client:send'\r\n')
+					assert(send('HTTP/1.1 '..status..'\r\n'))
+					for k,v in pairs(headers) do
+						assert(send(k..': '..v..'\r\n'))
+					end
+					assert(send'\r\n')
 					if callback then
+--print'wsapi started writing'
 						for str in callback do
-							assert(client:send(str))
+							assert(send(str))
 						end
+--print'wsapi done writing'
 					else
-						assert(client:send[[someone forgot to set a callback!]])
+						assert(send[[someone forgot to set a callback!]])
 					end
 				end
 			end, function(err)
