@@ -38,7 +38,7 @@ local function findDontInterpret(docroot, remotePath)
 	end
 	for i=#dirparts,#docrootparts,-1 do
 		local check = table.concat({table.unpack(dirparts,1,i)}, '/')
-		if io.fileexists(check..'/.dontinterpret') then
+		if os.fileexists(check..'/.dontinterpret') then
 			return true
 		end
 	end
