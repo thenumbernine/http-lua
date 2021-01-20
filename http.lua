@@ -185,7 +185,7 @@ while true do
 									coroutine.yield(
 										'<tr>'
 										..'<td><a href="'..nextfilename..'">'..displayfile..'</a></td>'
-										..'<td>'..(subattr and os.date('%F %T',subattr.modification) or '')..'</td>'
+										..'<td>'..(subattr and os.date('%Y-%m-%d %H:%M:%S',subattr.modification) or '')..'</td>'
 										..'<td style="text-align:center">'..(subattr and (subattr.mode == 'directory' and '-' or subattr.size) or '')..'</td>'
 										..'</tr>\n')
 								end
