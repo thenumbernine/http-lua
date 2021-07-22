@@ -4,6 +4,7 @@ local class = require 'ext.class'
 local string = require 'ext.string'
 local io = require 'ext.io'
 local os = require 'ext.os'
+local template = require 'template'
 local socket = require'socket'
 local url = require 'socket.url'
 local http = require 'socket.http'
@@ -97,6 +98,40 @@ function HTTP:findDontInterpret(docroot, remotePath)
 	end
 end
 
+-- returns the template code to execute when handling a directory
+function HTTP:handleDirectoryTemplate()
+	return [[
+<html>
+	<head>
+		<title>Directory Listing of <?=filename?></title>
+		<style type="text/css"> td{padding-right:20px};</style>
+	</head>
+	<body>
+		<h3>Index of <?=filename?></h3>
+		<table>
+			<tr>
+				<th>Name</th>
+				<th>Modified</th>
+				<th>Size</th>
+			</tr>
+<? for _,f in ipairs(files) do
+	local displayfile = f
+	local subattr = lfs.attributes(localfilename..'/'..f)
+	if subattr and subattr.mode == 'directory' then
+		displayfile = '[' .. displayfile .. ']'
+	end
+?>			<tr>
+				<td><a href="<?=(filename..'/'..f):gsub('//', '/')?>"><?=displayfile?></a></td>
+				<td><?=(subattr and os.date('%Y-%m-%d %H:%M:%S',subattr.modification) or '')?></td>
+				<td style="text-align:center"><?=(subattr and (subattr.mode == 'directory' and '-' or subattr.size) or '')?></td>
+			</tr>
+<? end
+?>		</table>
+	</body>
+</html>
+]]
+end
+
 -- return callback
 -- headers is modifyable
 function HTTP:handleDirectory(
@@ -106,48 +141,46 @@ function HTTP:handleDirectory(
 )
 	headers['content-type'] = 'text/html'
 	return '200/OK', coroutine.wrap(function()
-		coroutine.yield(
-			'<html>\n'
-			..'<head>\n'
-			..'<title>Directory Listing of '..filename..'</title>\n'
-			..'<style type="text/css"> td{padding-right:20px};</style>\n'
-			..'</head>\n'
-			..'<body>\n'
-			..'<h3>Index of '..filename..'</h3>\n'
-			..'<table>\n'
-			..'<tr><th>Name</th><th>Modified</th><th>Size</th></tr>\n')
+		
 		local files = table()
 		for f in lfs.dir(localfilename) do
-			files:insert(f)
-		end
-		files:sort(function (a,b) return a:lower() < b:lower() end)
-		for _,f in ipairs(files) do
 			if f ~= '.' then
-				local nextfilename = (filename..'/'..f):gsub('//', '/')
-				local displayfile = f
-				local subattr = lfs.attributes(localfilename..'/'..f)
-				if subattr and subattr.mode == 'directory' then
-					displayfile = '[' .. displayfile .. ']'
-				end
-				coroutine.yield(
-					'<tr>'
-					..'<td><a href="'..nextfilename..'">'..displayfile..'</a></td>'
-					..'<td>'..(subattr and os.date('%Y-%m-%d %H:%M:%S',subattr.modification) or '')..'</td>'
-					..'<td style="text-align:center">'..(subattr and (subattr.mode == 'directory' and '-' or subattr.size) or '')..'</td>'
-					..'</tr>\n')
+				files:insert(f)
 			end
 		end
+		files:sort(function (a,b) return a:lower() < b:lower() end)
+
 		coroutine.yield(
-			'</table>\n'
-			..'</body>\n')
+			template(
+				self:handleDirectoryTemplate(),
+				{
+					lfs = lfs,
+					files = files,
+					localfilename = localfilename,
+					filename = filename,
+				}
+			)
+		)
+	end)
+end
+
+function HTTP:makeGETTable(GET)
+	return string.split(GET or '', '&'):map(function(kv, _, t)
+		local k, v = kv:match('([^=]*)=(.*)')
+		if not v then k,v = kv, #t+1 end
+		k, v = url.unescape(k), url.unescape(v)
+		return v, k
 	end)
 end
 
 function HTTP:handleFilename(
 	filename,
 	localfilename,
+	ext,
+	dir,
 	headers,
 	reqHeaders,
+	GET,
 	POST
 )
 	local result = io.readfile(localfilename)
@@ -158,10 +191,6 @@ function HTTP:handleFilename(
 		end)
 	end
 
-	local _,ext = io.getfileext(localfilename)
-	local dir, _ = io.getfiledir(localfilename)
-	self:log(1, 'wsapi',self.wsapi)
-	self:log(1, 'ext',ext)
 	local dontinterpret = self:findDontInterpret(self.docroot, filename)
 	self:log(1, 'dontinterpret?', dontinterpret)
 	
@@ -173,7 +202,7 @@ function HTTP:handleFilename(
 		assert(lfs.chdir(dir))
 		headers['content-type'] = self.mime.types.html
 		return '200/OK', coroutine.wrap(function()
-			coroutine.yield(require 'template'(result))
+			coroutine.yield(template(result))
 		end)
 	end
 
@@ -198,12 +227,7 @@ function HTTP:handleFilename(
 		local fn = assert(f())
 		local status, headers2, callback = fn.run{
 			reqHeaders = reqHeaders,
-			GET = string.split(getargs or'', '&'):map(function(kv, _, t)
-				local k, v = kv:match('([^=]*)=(.*)')
-				if not v then k,v = kv, #t+1 end
-				k, v = url.unescape(k), url.unescape(v)
-				return v, k
-			end),
+			GET = self:makeGETTable(GET),
 			POST = POST,
 		}
 		for k,v in pairs(headers2) do
@@ -227,6 +251,7 @@ function HTTP:handleRequest(
 	reqHeaders,
 	method,
 	proto,
+	GET,
 	POST
 )
 	headers['cache-control'] = 'no-cache, no-store, must-revalidate'
@@ -241,11 +266,19 @@ function HTTP:handleRequest(
 		return self:handleDirectory(filename, localfilename, headers)
 	end
 	
+	local _,ext = io.getfileext(localfilename)
+	local dir, _ = io.getfiledir(localfilename)
+	self:log(1, 'ext', ext)
+	self:log(1, 'dir', dir)
+	
 	return self:handleFilename(
 		filename,
 		localfilename,
+		ext,
+		dir,
 		headers,
 		reqHeaders,
+		GET,
 		POST
 	)
 end
@@ -310,7 +343,7 @@ function HTTP:handleClient(client)
 		end
 --]]
 		filename = url.unescape(filename:gsub('%+','%%20'))
-		local base, getargs = filename:match('(.-)%?(.*)')
+		local base, GET = filename:match('(.-)%?(.*)')
 		filename = base or filename
 		if not filename then
 			self:log(1, "couldn't find filename in request "..('%q'):format(request))
@@ -322,6 +355,7 @@ function HTTP:handleClient(client)
 				reqHeaders,
 				method,
 				proto,
+				GET,
 				POST
 			)
 		
