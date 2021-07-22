@@ -1,4 +1,5 @@
 local HTTP = require 'http.class'
+local cmdline = require 'ext.cmdline'(...)
 
 -- using globals allows initializing this via "lua -e 'key=value ...' -lhttp"
 -- but using a script wrapper could easily
