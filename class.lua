@@ -335,8 +335,12 @@ function HTTP:handleClient(client)
 					local k, v = kv:match'([^=]*)=(.*)'
 					if not v then k,v = kv, #t+1 end
 					self:log(10, 'before unescape, k='..k..' v='..v)							
+					
+					-- plusses are already encoded as %2B, right?
+					-- because it looks like jQuery ajax() POST is replacing ' ' with '+'
 					k = k:gsub('+', ' ')
 					v = v:gsub('+', ' ')
+					
 					k, v = url.unescape(k), url.unescape(v)
 					self:log(10, 'after unescape, k='..k..' v='..v)							
 					return v, k
