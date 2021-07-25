@@ -173,7 +173,7 @@ function HTTP:makeGETTable(GET)
 	end)
 end
 
-function HTTP:handleFilename(
+function HTTP:handleFile(
 	filename,
 	localfilename,
 	ext,
@@ -185,13 +185,15 @@ function HTTP:handleFilename(
 )
 	local result = io.readfile(localfilename)
 	if not result then
-		self:log(1, 'from dir '..lfs.currentdir()..' failed to find file at', localfilename)
-		return '404 Not Found', coroutine.wrap(function()
-			coroutine.yield('failed to find file '..filename)
+		self:log(1, 'from dir '..lfs.currentdir()..' failed to read file at', localfilename)
+		return '403 Forbidden', coroutine.wrap(function()
+			coroutine.yield('failed to read file '..filename)
 		end)
 	end
 
-	local dontinterpret = self:findDontInterpret(self.docroot, filename)
+	local dontinterpret = self:findDontInterpret(
+		dir,--self.docroot, 
+		filename)
 	self:log(1, 'dontinterpret?', dontinterpret)
 	
 	if self.wsapi and (
@@ -245,6 +247,11 @@ function HTTP:handleFilename(
 	end)
 end
 
+-- docroot is more traditional, this is more flexible, here's how I'm mixing them
+function HTTP:getSearchPaths()
+	return table{self.docroot}
+end
+
 function HTTP:handleRequest(
 	filename,
 	headers,
@@ -258,29 +265,43 @@ function HTTP:handleRequest(
 	headers['pragma'] = 'no-cache'
 	headers['expires'] = '0'
 	
-	local localfilename = ('./'..filename):gsub('/+', '/')
-	
-	local attr = lfs.attributes(localfilename)
-	if attr and attr.mode == 'directory' then
-		self:log(1, 'serving directory',filename)
-		return self:handleDirectory(filename, localfilename, headers)
+	-- this is slowly becoming a real webserver
+	-- do multiple search paths here:
+	for _,path in ipairs(self:getSearchPaths()) do
+		local localfilename = ('./'..filename):gsub('/+', '/')
+		
+		local attr = lfs.attributes(localfilename)
+		if attr then
+			if attr.mode == 'directory' then
+				self:log(1, 'serving directory',filename)
+				return self:handleDirectory(filename, localfilename, headers)
+			end
+
+			-- handle file:
+			local _,ext = io.getfileext(localfilename)
+			local dir, _ = io.getfiledir(localfilename)
+			self:log(1, 'ext', ext)
+			self:log(1, 'dir', dir)
+			
+			return self:handleFile(
+				filename,
+				localfilename,
+				ext,
+				dir,
+				headers,
+				reqHeaders,
+				GET,
+				POST
+			)
+		else
+			self:log(1, 'from dir '..lfs.currentdir()..' failed to find file at', localfilename)
+		end
 	end
-	
-	local _,ext = io.getfileext(localfilename)
-	local dir, _ = io.getfiledir(localfilename)
-	self:log(1, 'ext', ext)
-	self:log(1, 'dir', dir)
-	
-	return self:handleFilename(
-		filename,
-		localfilename,
-		ext,
-		dir,
-		headers,
-		reqHeaders,
-		GET,
-		POST
-	)
+
+	self:log(1, 'failed to find any files at', filename)
+	return '404 Not Found', coroutine.wrap(function()
+		coroutine.yield('failed to find file '..filename)
+	end)
 end
 
 function HTTP:handleClient(client)

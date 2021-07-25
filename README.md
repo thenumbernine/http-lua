@@ -25,7 +25,8 @@ alternatively you can explicitly invoke the file via:
 `lua path/to/http.lua`
 
 
-or you can set the `LUAHTTP_DIR` variable and copy the lhttp.bat file to some executable directory and use:
+or you can set the `LUAHTTP_DIR` variable to wherever the rockspec is installed, 
+and copy the lhttp.bat file to some executable directory and use:
 
 `lhttp`
 
