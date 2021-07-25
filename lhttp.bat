@@ -7,12 +7,14 @@ rem so if LUAHTTP_DIR isn't defined, just assume luarocks is, and try to find lu
 
 if not defined LUAHTTP_DIR (
 	echo LUAHTTP_DIR was not defined.
+	call :assignDirEnvVar
 ) else (
 	if not exist %LUAHTTP_DIR%\http.lua (
 		echo LUAHTTPDIR is set to a bad location: %LUAHTTP_DIR%
+		call :assignDirEnvVar
 	)
 )
-call :assignDirEnvVar
+
 
 echo starting...
 lua %LUAHTTP_DIR%\http.lua %*
