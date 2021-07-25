@@ -11,6 +11,10 @@ local http = require 'socket.http'
 local MIMETypes = require 'mimetypes'
 
 
+-- bcuz of a subclass that's hacking global print ...
+local print = print
+
+
 local HTTP = class()
 
 --[[
@@ -252,23 +256,26 @@ function HTTP:getSearchPaths()
 	return table{self.docroot}
 end
 
-function HTTP:handleRequest(
-	filename,
-	headers,
-	reqHeaders,
-	method,
-	proto,
-	GET,
-	POST
-)
+function HTTP:handleRequest(...)
+	self:log(2, "HTTP:handleRequest", ...)
+	local filename,
+		headers,
+		reqHeaders,
+		method,
+		proto,
+		GET,
+		POST = ...
+
 	headers['cache-control'] = 'no-cache, no-store, must-revalidate'
 	headers['pragma'] = 'no-cache'
 	headers['expires'] = '0'
 	
 	-- this is slowly becoming a real webserver
 	-- do multiple search paths here:
-	for _,path in ipairs(self:getSearchPaths()) do
-		local localfilename = ('./'..filename):gsub('/+', '/')
+	for _,searchdir in ipairs(self:getSearchPaths()) do
+		self:log(1, "searching in dir "..searchdir)
+
+		local localfilename = (searchdir..'/'..filename):gsub('/+', '/')
 		
 		local attr = lfs.attributes(localfilename)
 		if attr then
@@ -279,22 +286,22 @@ function HTTP:handleRequest(
 
 			-- handle file:
 			local _,ext = io.getfileext(localfilename)
-			local dir, _ = io.getfiledir(localfilename)
+			local dirforfile, _ = io.getfiledir(localfilename)
 			self:log(1, 'ext', ext)
-			self:log(1, 'dir', dir)
+			self:log(1, 'dirforfile', dirforfile)
 			
 			return self:handleFile(
 				filename,
 				localfilename,
 				ext,
-				dir,
+				dirforfile,
 				headers,
 				reqHeaders,
 				GET,
 				POST
 			)
 		else
-			self:log(1, 'from dir '..lfs.currentdir()..' failed to find file at', localfilename)
+			self:log(1, 'from searchdir '..searchdir..' failed to find file at', localfilename)
 		end
 	end
 
@@ -346,7 +353,7 @@ function HTTP:handleClient(client)
 			
 			local postLen = tonumber(reqHeaders['content-length'])
 			if not postLen then
-				print"didn't get POST data length"
+				self:log(0, "didn't get POST data length")
 			else
 				self:log(1, 'reading POST '..postLen..' bytes')
 				--local postData = readline()
