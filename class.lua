@@ -87,6 +87,7 @@ function HTTP:log(level, ...)
 end
 
 function HTTP:findDontInterpret(docroot, remotePath)
+	self:log(10, "looking for dontinterpret at docroot='"..docroot.."' remotePath='"..remotePath.."'")
 	local localPath = docroot .. remotePath
 	local dir = io.getfiledir(localPath)
 	local docrootparts = string.split(docroot, '/')
@@ -95,11 +96,14 @@ function HTTP:findDontInterpret(docroot, remotePath)
 		assert(docrootparts[i] == dirparts[i])
 	end
 	for i=#dirparts,#docrootparts,-1 do
-		local check = table.concat({table.unpack(dirparts,1,i)}, '/')
-		if os.fileexists(check..'/.dontinterpret') then
+		local check = table.concat({table.unpack(dirparts,1,i)}, '/')..'/.dontinterpret'
+		self:log(10, "checking file '"..check.."'")
+		if os.fileexists(check) then
+			self:log(10, "found .dontinterpret")
 			return true
 		end
 	end
+	self:log(10, "didn't find .dontinterpret")
 end
 
 -- returns the template code to execute when handling a directory
@@ -169,6 +173,7 @@ function HTTP:handleDirectory(
 end
 
 function HTTP:makeGETTable(GET)
+	if not GET then return {} end
 	return string.split(GET or '', '&'):map(function(kv, _, t)
 		local k, v = kv:match('([^=]*)=(.*)')
 		if not v then k,v = kv, #t+1 end
@@ -196,7 +201,7 @@ function HTTP:handleFile(
 	end
 
 	local dontinterpret = self:findDontInterpret(
-		dir,--self.docroot, 
+		self.docroot, --dir,
 		filename)
 	self:log(1, 'dontinterpret?', dontinterpret)
 	
@@ -206,7 +211,10 @@ function HTTP:handleFile(
 	) then
 		self:log(1, 'running templated script',filename)
 		assert(lfs.chdir(dir))
-		headers['content-type'] = self.mime.types.html
+		headers['content-type'] = 
+			localfilename:sub(-7) == '.js.lua'
+			and self.mime.types.js
+			or self.mime.types.html
 		return '200/OK', coroutine.wrap(function()
 			coroutine.yield(template(result))
 		end)
@@ -235,6 +243,8 @@ function HTTP:handleFile(
 			reqHeaders = reqHeaders,
 			GET = self:makeGETTable(GET),
 			POST = POST,
+			-- wsapi variables:
+			SCRIPT_FILENAME = localfilename,
 		}
 		for k,v in pairs(headers2) do
 			k = k:lower()
