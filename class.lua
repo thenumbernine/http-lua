@@ -216,7 +216,12 @@ function HTTP:handleFile(
 			and self.mime.types.js
 			or self.mime.types.html
 		return '200/OK', coroutine.wrap(function()
-			coroutine.yield(template(result))
+			coroutine.yield(template(result, {
+				env = {
+					--SERVER_NAME = os.getenv'HOSTNAME',
+					SCRIPT_FILENAME = localfilename,
+				},
+			}))
 		end)
 	end
 
