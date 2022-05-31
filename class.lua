@@ -347,8 +347,12 @@ function HTTP:handleClient(client)
 		
 		local POST
 		local reqHeaders
+		
+		method = method:lower()
+		if method == 'get' then
+			-- fall through, don't error
 -- [[
-		if method:lower() == 'post' then
+		elseif method == 'post' then
 			reqHeaders = {}
 			while true do
 				local line = readline()
@@ -389,8 +393,11 @@ function HTTP:handleClient(client)
 					return v, k
 				end)
 			end
-		end
 --]]
+		else
+			error("unknown method: "..method)
+		end
+		
 		filename = url.unescape(filename:gsub('%+','%%20'))
 		local base, GET = filename:match('(.-)%?(.*)')
 		filename = base or filename
@@ -447,6 +454,25 @@ function HTTP:run()
 		else
 			client = self.server:accept()
 			if client then
+				--[[ can I do this?
+				-- from https://stackoverflow.com/questions/2833947/stuck-with-luasec-lua-secure-socket
+				-- TODO need to specify cert files
+				-- TODO but if you want to handle both https and non-https on different ports, that means two connections, that means better make non-blocking the default
+				if self.usetls then
+					local ssl = require 'ssl'	-- package luasec
+					assert(client:settimeout(10))
+					client = assert(ssl.wrap(client, {
+						mode = 'server',
+						protocol = 'sslv3',
+						key = 'path/to/server.key',
+						certificate = 'path/to/server.crt',
+						password = '12345',
+						options = {'all', 'no_sslv2'},
+						ciphers = 'ALL:!ADH:@STRENGTH',
+					}))
+					client:dohandshake()
+				end
+				--]]
 				assert(client:settimeout(0,'b'))
 				assert(client:setoption('keepalive',true))
 				self:log(1, 'got client!')
