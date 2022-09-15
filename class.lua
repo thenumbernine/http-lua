@@ -1,9 +1,7 @@
-local lfs = require 'lfs'
+local file = require 'ext.file'
 local table = require 'ext.table'
 local class = require 'ext.class'
 local string = require 'ext.string'
-local io = require 'ext.io'
-local os = require 'ext.os'
 local template = require 'template'
 local socket = require'socket'
 local url = require 'socket.url'
@@ -61,7 +59,7 @@ function HTTP:init(args)
 	-- this stuff is not important if you are doing your own custom handlers
 
 
-	self.docroot = lfs.currentdir()
+	self.docroot = file:cwd()
 
 
 	-- whether to simulate wsapi for .lua pages
@@ -89,7 +87,7 @@ end
 function HTTP:findDontInterpret(docroot, remotePath)
 	self:log(10, "looking for dontinterpret at docroot='"..docroot.."' remotePath='"..remotePath.."'")
 	local localPath = docroot .. remotePath
-	local dir = io.getfiledir(localPath)
+	local dir = file(localPath):getdir()
 	local docrootparts = string.split(docroot, '/')
 	local dirparts = string.split(dir, '/')
 	for i=1,#docrootparts do
@@ -98,7 +96,7 @@ function HTTP:findDontInterpret(docroot, remotePath)
 	for i=#dirparts,#docrootparts,-1 do
 		local check = table.concat({table.unpack(dirparts,1,i)}, '/')..'/.dontinterpret'
 		self:log(10, "checking file '"..check.."'")
-		if os.fileexists(check) then
+		if file(check):exists() then
 			self:log(10, "found .dontinterpret")
 			return true
 		end
@@ -124,7 +122,7 @@ function HTTP:handleDirectoryTemplate()
 			</tr>
 <? for _,f in ipairs(files) do
 	local displayfile = f
-	local subattr = lfs.attributes(localfilename..'/'..f)
+	local subattr = file(localfilename..'/'..f):attr()
 	if subattr and subattr.mode == 'directory' then
 		displayfile = '[' .. displayfile .. ']'
 	end
@@ -151,7 +149,7 @@ function HTTP:handleDirectory(
 	return '200/OK', coroutine.wrap(function()
 		
 		local files = table()
-		for f in lfs.dir(localfilename) do
+		for f in file(localfilename):dir() do
 			if f ~= '.' then
 				files:insert(f)
 			end
@@ -162,7 +160,7 @@ function HTTP:handleDirectory(
 			template(
 				self:handleDirectoryTemplate(),
 				{
-					lfs = lfs,
+					lfs = require 'lfs',	-- TODO file?
 					files = files,
 					localfilename = localfilename,
 					filename = filename,
@@ -192,9 +190,9 @@ function HTTP:handleFile(
 	GET,
 	POST
 )
-	local result = io.readfile(localfilename)
+	local result = file(localfilename):read()
 	if not result then
-		self:log(1, 'from dir '..lfs.currentdir()..' failed to read file at', localfilename)
+		self:log(1, 'from dir '..file:cwd()..' failed to read file at', localfilename)
 		return '403 Forbidden', coroutine.wrap(function()
 			coroutine.yield('failed to read file '..filename)
 		end)
@@ -210,7 +208,7 @@ function HTTP:handleFile(
 		or localfilename:sub(-7) == '.js.lua'
 	) then
 		self:log(1, 'running templated script',filename)
-		assert(lfs.chdir(dir))
+		assert(file(dir):cd())
 		headers['content-type'] = 
 			localfilename:sub(-7) == '.js.lua'
 			and self.mime.types.js
@@ -230,7 +228,7 @@ function HTTP:handleFile(
 	and not dontinterpret
 	then
 		self:log(1, 'running script',filename)
-		assert(lfs.chdir(dir))
+		assert(file(dir):cd())
 	
 		-- trim off the linux executable stuff that lua interpreter usually does for me
 		if result:sub(1,2) == '#!' then
@@ -262,7 +260,7 @@ function HTTP:handleFile(
 	self:log(1, 'serving file',filename)
 	headers['content-type'] = ext and self.mime.types[ext:lower()] or 'application/octet-stream'
 	return '200/OK', coroutine.wrap(function()
-		coroutine.yield(io.readfile(localfilename))
+		coroutine.yield(file(localfilename):read())
 	end)
 end
 
@@ -292,7 +290,7 @@ function HTTP:handleRequest(...)
 
 		local localfilename = (searchdir..'/'..filename):gsub('/+', '/')
 		
-		local attr = lfs.attributes(localfilename)
+		local attr = file(localfilename):attr()
 		if attr then
 			if attr.mode == 'directory' then
 				self:log(1, 'serving directory',filename)
@@ -300,8 +298,8 @@ function HTTP:handleRequest(...)
 			end
 
 			-- handle file:
-			local _,ext = io.getfileext(localfilename)
-			local dirforfile, _ = io.getfiledir(localfilename)
+			local _,ext = file(localfilename):getext()
+			local dirforfile, _ = file(localfilename):getdir()
 			self:log(1, 'ext', ext)
 			self:log(1, 'dirforfile', dirforfile)
 			
@@ -437,7 +435,7 @@ function HTTP:handleClient(client)
 	end, function(err)
 		io.stderr:write(err..'\n'..debug.traceback()..'\n')
 	end)
-	assert(lfs.chdir(self.docroot))
+	assert(file(self.docroot):cd())
 	self:log(1, 'collectgarbage', collectgarbage())
 end
 
