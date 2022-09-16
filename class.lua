@@ -160,7 +160,6 @@ function HTTP:handleDirectory(
 			template(
 				self:handleDirectoryTemplate(),
 				{
-					lfs = require 'lfs',	-- TODO file?
 					files = files,
 					localfilename = localfilename,
 					filename = filename,
