@@ -160,6 +160,7 @@ function HTTP:handleDirectory(
 			template(
 				self:handleDirectoryTemplate(),
 				{
+					file = file,
 					files = files,
 					localfilename = localfilename,
 					filename = filename,
