@@ -67,7 +67,7 @@ function HTTP:init(args)
 	if self.wsapi == nil then self.wsapi = true end
 	if self.wsapi then
 		package.loaded['wsapi.request'] = {
-			new = function(env) 
+			new = function(env)
 				env = env or {}
 				env.doc_root = self.docroot
 				return env
@@ -147,7 +147,7 @@ function HTTP:handleDirectory(
 )
 	headers['content-type'] = 'text/html'
 	return '200/OK', coroutine.wrap(function()
-		
+
 		local files = table()
 		for f in file(localfilename):dir() do
 			if f ~= '.' then
@@ -202,14 +202,14 @@ function HTTP:handleFile(
 		self.docroot, --dir,
 		filename)
 	self:log(1, 'dontinterpret?', dontinterpret)
-	
+
 	if self.wsapi and (
 		localfilename:sub(-9) == '.html.lua'
 		or localfilename:sub(-7) == '.js.lua'
 	) then
 		self:log(1, 'running templated script',filename)
 		assert(file(dir):cd())
-		headers['content-type'] = 
+		headers['content-type'] =
 			localfilename:sub(-7) == '.js.lua'
 			and self.mime.types.js
 			or self.mime.types.html
@@ -223,23 +223,23 @@ function HTTP:handleFile(
 		end)
 	end
 
-	if self.wsapi 
-	and ext == 'lua' 
+	if self.wsapi
+	and ext == 'lua'
 	and not dontinterpret
 	then
 		self:log(1, 'running script',filename)
 		assert(file(dir):cd())
-	
+
 		-- trim off the linux executable stuff that lua interpreter usually does for me
 		if result:sub(1,2) == '#!' then
 			result = result:match'^[^\n]*\n(.*)$'
 		end
-		
+
 		local sandboxenv = setmetatable({}, {__index=_ENV})
 		local f, err = load(result, localfilename, 'bt', sandboxenv)
-		if not f then 
+		if not f then
 			io.stderr:write(require 'template.showcode'(result),'\n')
-			error(err) 
+			error(err)
 		end
 		local fn = assert(f())
 		local status, headers2, callback = fn.run{
@@ -282,14 +282,14 @@ function HTTP:handleRequest(...)
 	headers['cache-control'] = 'no-cache, no-store, must-revalidate'
 	headers['pragma'] = 'no-cache'
 	headers['expires'] = '0'
-	
+
 	-- this is slowly becoming a real webserver
 	-- do multiple search paths here:
 	for _,searchdir in ipairs(self:getSearchPaths()) do
 		self:log(1, "searching in dir "..searchdir)
 
 		local localfilename = (searchdir..'/'..filename):gsub('/+', '/')
-		
+
 		local attr = file(localfilename):attr()
 		if attr then
 			if attr.mode == 'directory' then
@@ -302,7 +302,7 @@ function HTTP:handleRequest(...)
 			local dirforfile, _ = file(localfilename):getdir()
 			self:log(1, 'ext', ext)
 			self:log(1, 'dirforfile', dirforfile)
-			
+
 			return self:handleFile(
 				filename,
 				localfilename,
@@ -335,17 +335,17 @@ function HTTP:handleClient(client)
 		end
 		return t:unpack(1,t.n)
 	end
-	
+
 	local request = readline()
 	if not request then return end
 
 	xpcall(function()
 		self:log(1, 'got request',request)
 		local method, filename, proto = string.split(request, '%s+'):unpack()
-		
+
 		local POST
 		local reqHeaders
-		
+
 		method = method:lower()
 		if method == 'get' then
 			-- fall through, don't error
@@ -356,9 +356,9 @@ function HTTP:handleClient(client)
 				local line = readline()
 				if not line then break end
 				line = string.trim(line)
-				if line == '' then 
+				if line == '' then
 					self:log(1, 'done reading header')
-					break 
+					break
 				end
 				local k,v = line:match'^(.-):(.*)$'
 				if not k then
@@ -367,35 +367,65 @@ function HTTP:handleClient(client)
 				end
 				reqHeaders[k:lower()] = v
 			end
-			
+
 			local postLen = tonumber(reqHeaders['content-length'])
 			if not postLen then
 				self:log(0, "didn't get POST data length")
 			else
 				self:log(1, 'reading POST '..postLen..' bytes')
 				--local postData = readline()
-				local postData = client:receive(postLen)
+				local postData = client:receive(postLen) or ''
+				-- TODO what to do with post data we don't get?
 				self:log(1, 'read POST data: '..postData)
-				POST = string.split(postData, '&'):mapi(function(kv, _, t)
-					local k, v = kv:match'([^=]*)=(.*)'
-					if not v then k,v = kv, #t+1 end
-					self:log(10, 'before unescape, k='..k..' v='..v)							
-					
-					-- plusses are already encoded as %2B, right?
-					-- because it looks like jQuery ajax() POST is replacing ' ' with '+'
-					k = k:gsub('+', ' ')
-					v = v:gsub('+', ' ')
-					
-					k, v = url.unescape(k), url.unescape(v)
-					self:log(10, 'after unescape, k='..k..' v='..v)							
-					return v, k
-				end)
+				-- TODO only split like this if we get application/x-www-form-urlencoded
+				-- or multipart/form-data;boundary="boundary"
+				-- or something ... ?
+				local contentType = string.trim(reqHeaders['content-type'])
+				self:log(1, "what to do with post an our content-type "..tostring(contentType))
+				if contentType == 'application/x-www-form-urlencoded'
+				then
+					self:log(2, "splitting up post...")
+					POST = string.split(postData, '&'):mapi(function(kv, _, t)
+						local k, v = kv:match'([^=]*)=(.*)'
+						if not v then k,v = kv, #t+1 end
+						self:log(10, 'before unescape, k='..k..' v='..v)
+
+						-- plusses are already encoded as %2B, right?
+						-- because it looks like jQuery ajax() POST is replacing ' ' with '+'
+						k = k:gsub('+', ' ')
+						k = url.unescape(k)
+						if type(v) == 'string' then
+							v = v:gsub('+', ' ')
+							v = url.unescape(v)
+						end
+						self:log(10, 'after unescape, k='..k..' v='..v)
+						return v, k
+					end)
+				elseif contentType:match('^'..string.patescape('multipart/form-data')) then
+					local boundary = contentType:match('^'..string.patescape('multipart/form-data')..'; boundary=(.*)')
+					boundary = string.trim(boundary)
+					string.split(
+						postData,
+						string.patescape('--'..boundary)
+					)
+					--[[
+					each part has:
+					`Content-Disposition: form-data; name="$name"` ... optionally ` filename="$filename"` ... `\r\n`
+					optionally for files: `Content-Type: image/png\r\n`
+					--]]
+				
+					POST = [[
+TODO
+					]]
+				else
+					POST = postData
+				end
 			end
 --]]
 		else
 			error("unknown method: "..method)
 		end
-		
+
 		filename = url.unescape(filename:gsub('%+','%%20'))
 		local base, GET = filename:match('(.-)%?(.*)')
 		filename = base or filename
@@ -412,7 +442,7 @@ function HTTP:handleClient(client)
 				GET,
 				POST
 			)
-		
+
 			local function send(s)
 				self:log(10, 'sending '..s)
 				return client:send(s)
@@ -441,11 +471,11 @@ end
 
 function HTTP:run()
 	while true do
-		local client	
+		local client
 		if self.block then
-			self:log(1, 'waiting for client...')	
+			self:log(1, 'waiting for client...')
 			client = assert(self.server:accept())
-			self:log(1, 'got client!')	
+			self:log(1, 'got client!')
 			assert(client:settimeout(3600,'b'))
 			self.clients:insert(client)
 			self:log(1, 'total #clients',#self.clients)
@@ -479,7 +509,7 @@ function HTTP:run()
 			end
 		end
 		for j=#self.clients,1,-1 do
-			client = self.clients[j]	
+			client = self.clients[j]
 			self:handleClient(client)
 			self:log(1, 'closing client...')
 			client:close()
