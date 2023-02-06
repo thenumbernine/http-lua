@@ -375,15 +375,9 @@ function HTTP:handleClient(client)
 				self:log(1, 'reading POST '..postLen..' bytes')
 				--local postData = readline()
 				local postData = client:receive(postLen) or ''
-				-- TODO what to do with post data we don't get?
 				self:log(1, 'read POST data: '..postData)
-				-- TODO only split like this if we get application/x-www-form-urlencoded
-				-- or multipart/form-data;boundary="boundary"
-				-- or something ... ?
 				local contentType = string.trim(reqHeaders['content-type'])
-				self:log(1, "what to do with post an our content-type "..tostring(contentType))
-				if contentType == 'application/x-www-form-urlencoded'
-				then
+				if contentType == 'application/x-www-form-urlencoded' then
 					self:log(2, "splitting up post...")
 					POST = string.split(postData, '&'):mapi(function(kv, _, t)
 						local k, v = kv:match'([^=]*)=(.*)'
@@ -402,22 +396,49 @@ function HTTP:handleClient(client)
 						return v, k
 					end)
 				elseif contentType:match('^'..string.patescape('multipart/form-data')) then
+					-- TODO technically  I should be splitting this line by ; and then making a key=value map out of it
 					local boundary = contentType:match('^'..string.patescape('multipart/form-data')..'; boundary=(.*)')
 					boundary = string.trim(boundary)
-					string.split(
-						postData,
-						string.patescape('--'..boundary)
-					)
-					--[[
-					each part has:
-					`Content-Disposition: form-data; name="$name"` ... optionally ` filename="$filename"` ... `\r\n`
-					optionally for files: `Content-Type: image/png\r\n`
-					--]]
-				
-					POST = [[
-TODO
-					]]
+					local parts = string.split(postData, string.patescape('--'..boundary..'\r\n'))
+					assert(parts:remove(1) == '')
+					POST = {}
+					while #parts > 0 do
+						local formInputData = parts:remove(1)
+						self:log(2, 'form-data part:\n'..formInputData)
+						local lines = string.split(formInputData, '\r\n')
+						-- then do another header-read here with k:v; .. kinda with some optional stuff too ...
+						-- who thinks this stupid standard up? we have some k:v, some k=v, ...some bullshit
+						local thisPostVar = {}
+						while lines[1] ~= nil and lines[1] ~= '' do
+							-- in here is all the important stuff:
+							local nextline = lines:remove(1)
+							self:log(2, "next line:\n"..nextline)
+							local splits = string.split(nextline, ';')
+							for i,split in ipairs(splits) do
+								split = string.trim(split)
+								-- order probably matters
+								local k, v
+								if i == 1 then
+									k, v = split:match'([^:]*):(.*)$'
+									if k == nil or v == nil then
+										error("failed to parse POST form-data line "..split)
+									end
+								else
+									k, v = split:match'([^=]*)="(.*)"$'
+									if k == nil or v == nil then
+										error("failed to parse POST form-data line "..split)
+									end
+								end
+								thisPostVar[k:lower()] = v
+							end
+						end
+						assert(lines[1] ~= nil, "removed too many lines in our form-part data")
+						lines:remove()
+						POST[thisPostVar.name] = thisPostVar
+						POST[thisPostVar.name].body = lines:concat'\r\n'
+					end
 				else
+					self:log(1, "what to do with post an our content-type "..tostring(contentType))
 					POST = postData
 				end
 			end
