@@ -2,6 +2,7 @@ local file = require 'ext.file'
 local table = require 'ext.table'
 local class = require 'ext.class'
 local string = require 'ext.string'
+local tolua = require 'ext.tolua'
 local template = require 'template'
 local socket = require'socket'
 local url = require 'socket.url'
@@ -218,6 +219,8 @@ function HTTP:handleFile(
 				env = {
 					--SERVER_NAME = os.getenv'HOSTNAME',
 					SCRIPT_FILENAME = localfilename,
+					GET = self:makeGETTable(GET),
+					POST = POST,
 				},
 			}))
 		end)
@@ -399,13 +402,21 @@ function HTTP:handleClient(client)
 					-- TODO technically  I should be splitting this line by ; and then making a key=value map out of it
 					local boundary = contentType:match('^'..string.patescape('multipart/form-data')..'; boundary=(.*)')
 					boundary = string.trim(boundary)
-					local parts = string.split(postData, string.patescape('--'..boundary..'\r\n'))
+					local parts = string.split(postData, string.patescape('--'..boundary))
 					assert(parts:remove(1) == '')
 					POST = {}
 					while #parts > 0 do
 						local formInputData = parts:remove(1)
 						self:log(2, 'form-data part:\n'..formInputData)
 						local lines = string.split(formInputData, '\r\n')
+						self:log(3, tolua(lines))
+						if #parts == 0 then
+							assert(lines[1] == '--')
+							assert(lines[2] == '')
+							assert(#lines == 2)
+							break
+						end
+						assert(lines:remove(1) == '')
 						-- then do another header-read here with k:v; .. kinda with some optional stuff too ...
 						-- who thinks this stupid standard up? we have some k:v, some k=v, ...some bullshit
 						local thisPostVar = {}
@@ -429,13 +440,16 @@ function HTTP:handleClient(client)
 										error("failed to parse POST form-data line "..split)
 									end
 								end
-								thisPostVar[k:lower()] = v
+								thisPostVar[k:lower()] = string.trim(v)
 							end
 						end
 						assert(lines[1] ~= nil, "removed too many lines in our form-part data")
-						lines:remove()
+						assert(lines:remove(1) == '')
+						assert(lines:remove() == '')
+						local data = lines:concat'\r\n'
+						self:log(3, 'setting post var '..tostring(thisPostVar.name)..' to data len '..#data)
 						POST[thisPostVar.name] = thisPostVar
-						POST[thisPostVar.name].body = lines:concat'\r\n'
+						POST[thisPostVar.name].body = data
 					end
 				else
 					self:log(1, "what to do with post an our content-type "..tostring(contentType))
@@ -446,6 +460,8 @@ function HTTP:handleClient(client)
 		else
 			error("unknown method: "..method)
 		end
+
+self:log(3, "about to handleRequest with "..tolua{GET=GET, POST=POST})
 
 		filename = url.unescape(filename:gsub('%+','%%20'))
 		local base, GET = filename:match('(.-)%?(.*)')
