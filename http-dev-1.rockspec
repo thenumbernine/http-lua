@@ -16,7 +16,7 @@ description = {
 build = {
 	type = "builtin",
 	modules = {
-		class = "class.lua",
-		http = "http.lua"
+		["http.class"] = "class.lua",
+		["http"] = "http.lua"
 	}
 }
