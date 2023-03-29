@@ -29,7 +29,7 @@ function HTTP:init(args)
 	args = args or {}
 
 
-	local config = args.config or (os.getenv'HOME' or os.getenv'USERPROFILE')..'/.http.lua.conf'
+	local config = args.config or os.home()..'/.http.lua.conf'
 	self.mime = MIMETypes(config)
 
 
