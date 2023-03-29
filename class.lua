@@ -1,5 +1,6 @@
 local file = require 'ext.file'
 local table = require 'ext.table'
+local os = require 'ext.os'
 local class = require 'ext.class'
 local string = require 'ext.string'
 local tolua = require 'ext.tolua'
