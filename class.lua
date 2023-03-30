@@ -19,9 +19,13 @@ local HTTP = class()
 
 --[[
 args:
-	port = port to use, default 8000
 	addr = address to bind to, default *
+	port = port to use, default 8000.  port=false means don't use non-ssl connections
+	sslport = ssl port to use, default 8001. sslport=false means don't use ssl connections.
+	keyfile = ssl key file
+	certfile = ssl cert file
 	block = whether to use blocking, default true
+		block = true will have problems if port and sslport are used, since you'll have two blocking server sockets
 	wsapi = whether to use wsapi emulation
 	config = where to store the mimetypes file
 	log = log level.  level 0 = none, 1 = only most serious, 2 3 etc = more and more information, all the way to infinity.
@@ -29,31 +33,73 @@ args:
 function HTTP:init(args)
 	args = args or {}
 
-
 	local config = args.config or os.home()..'/.http.lua.conf'
 	self.mime = MIMETypes(config)
 
-
 	self.loglevel = args.log or 0
+	
+	self.servers = table()
+	local boundaddr, boundport
 
-
-	local port = args.port or 8000
 	local addr = args.addr or '*'
-	self.server = assert(socket.bind(addr, port))
-	self.addr, self.port = self.server:getsockname()
-	self:log(1, 'listening '..self.addr..':'..self.port)
+	local port = args.port or 8000		-- 80
+	if port then
+		self:log(3, "bind addr port "..tostring(addr)..':'..tostring(port))
+		self.server = assert(socket.bind(addr, port))
+		self.servers:insert(self.server)
+		boundaddr, boundport = self.server:getsockname()
+		self.port = boundport
+		self:log(1, 'listening '..tostring(boundaddr)..':'..tostring(boundport))
+	end
 
+	local sslport = args.sslport or 8001	-- 443 ... or should I even listen on ssl by default?
+	if sslport or args.keyfile or args.certfile then
+		if sslport 
+		and args.keyfile 
+		and args.certfile
+		then
+			self.keyfile = args.keyfile
+			self.certfile = args.certfile
+			assert(file(self.keyfile):exists(), "failed to find keyfile "..self.keyfile)
+			assert(file(self.certfile):exists(), "failed to find certfile "..self.certfile)
+			self:log(3, "bind ssl addr port "..tostring(addr)..':'..tostring(sslport))
+			self.sslserver = assert(socket.bind(addr, sslport))
+			self.servers:insert(self.sslserver)
+			boundaddr, boundport = self.sslserver:getsockname()
+			self.sslport = boundport
+			self:log(1, 'ssl listening '..tostring(boundaddr)..':'..tostring(boundport))
+			self:log(1, 'key file '..tostring(self.keyfile))
+			self:log(1, 'cert file '..tostring(self.certfile))
+		else
+			print('WARNING: for ssl to work you need to specify sslport, keyfile, certfile')
+		end
+	end
+	
+	self:log(3, '# server sockets '..tostring(#self.servers))
 
 	self.block = args.block
 	-- use blocking by default.
 	-- I had some trouble with blocking and MathJax on android.  Maybe it was my imagination.
-	if self.block == nil then self.block = true end
+	if self.block == nil then self.block = false end
+	self:log(1, "blocking? "..tostring(self.block))
+	
 	if self.block then
-		--assert(server:settimeout(3600))
-		--server:setoption('keepalive',true)
-		--server:setoption('linger',{on=true,timeout=3600})
+		--[[ not necessary?
+		for _,server in ipairs{self.server, self.sslserver} do
+			assert(server:settimeout(3600))
+			server:setoption('keepalive',true)
+			server:setoption('linger',{on=true,timeout=3600})
+		end
+		--]]
+		if #self.servers > 1 then
+			self:log(0, "WARNING: you're using blocking with two listening ports.  You will experience unexpected lengthy delays.")
+		end
 	else
-		assert(server:settimeout(0,'b'))
+		-- [[
+		for _,server in ipairs(self.servers) do
+			assert(server:settimeout(0,'b'))
+		end
+		--]]
 	end
 
 
@@ -328,6 +374,39 @@ function HTTP:handleRequest(...)
 	end)
 end
 
+-- matches websocket ... soon these two will merge, and this whole project will have gotten out of hand
+function HTTP:receiveBlocking(conn, waitduration)
+--	coroutine.yield()
+
+	local endtime
+	if waitduration then
+		endtime = secondsTimerFunc() + waitduration
+	end
+	local data
+	repeat
+--		coroutine.yield()
+		local reason
+		data, reason = conn:receive('*l')
+		if not data then
+			if reason == 'wantread' then
+--self:log('got wantread, calling select...')
+				socket.select(nil, {conn})
+--self:log('...done calling select')
+			else
+				if reason ~= 'timeout' then
+					return nil, reason		-- error() ?
+				end
+				-- else continue
+				if waitduration and secondsTimerFunc() > endtime then
+					return nil, 'timeout'
+				end
+			end
+		end
+	until data ~= nil
+
+	return data
+end
+
 function HTTP:handleClient(client)
 	local function readline()
 		local t = table.pack(client:receive())
@@ -510,40 +589,72 @@ end
 function HTTP:run()
 	while true do
 		local client
-		if self.block then
-			self:log(1, 'waiting for client...')
-			client = assert(self.server:accept())
-			self:log(1, 'got client!')
-			assert(client:settimeout(3600,'b'))
-			self.clients:insert(client)
-			self:log(1, 'total #clients',#self.clients)
-		else
-			client = self.server:accept()
-			if client then
-				--[[ can I do this?
-				-- from https://stackoverflow.com/questions/2833947/stuck-with-luasec-lua-secure-socket
-				-- TODO need to specify cert files
-				-- TODO but if you want to handle both https and non-https on different ports, that means two connections, that means better make non-blocking the default
-				if self.usetls then
-					local ssl = require 'ssl'	-- package luasec
-					assert(client:settimeout(10))
-					client = assert(ssl.wrap(client, {
-						mode = 'server',
-						protocol = 'sslv3',
-						key = 'path/to/server.key',
-						certificate = 'path/to/server.crt',
-						password = '12345',
-						options = {'all', 'no_sslv2'},
-						ciphers = 'ALL:!ADH:@STRENGTH',
-					}))
-					client:dohandshake()
-				end
-				--]]
-				assert(client:settimeout(0,'b'))
-				assert(client:setoption('keepalive',true))
+		for _,server in ipairs(self.servers) do
+			if self.block then
+				-- blocking is easiest with single-server-socket impls
+				-- tho it had problems on android luasocket iirc
+				-- and now that i'm switching to ssl as well, ... gonna have problems
+				self:log(1, 'waiting for client...')
+				client = assert(server:accept())
 				self:log(1, 'got client!')
+				assert(client:settimeout(3600,'b'))
 				self.clients:insert(client)
 				self:log(1, 'total #clients',#self.clients)
+			else
+				client = server:accept()
+				if client then
+					-- [[ should the client be non-blocking as well?  or can we assert the client will respond in time?
+					assert(client:setoption('keepalive',true))
+					assert(client:settimeout(0,'b'))
+					--]]
+					self:log(3, 'server:accept got ', client)
+					
+					-- TODO for block as well
+					if server == self.sslserver then
+						-- from https://stackoverflow.com/questions/2833947/stuck-with-luasec-lua-secure-socket
+						-- TODO need to specify cert files
+						-- TODO but if you want to handle both https and non-https on different ports, that means two connections, that means better make non-blocking the default
+						--assert(client:settimeout(10))
+						self:log(3, 'ssl server calling ssl.wrap...')
+self:log(1, 'key file '..tostring(self.keyfile))
+self:log(1, 'cert file '..tostring(self.certfile))
+						local ssl = require 'ssl'	-- package luasec
+						client = assert(ssl.wrap(client, {
+							mode = 'server',
+							options = {'all'},
+							protocol = 'any',
+							key = assert(self.keyfile),
+							certificate = assert(self.certfile),
+							password = '12345',
+							ciphers = 'ALL:!ADH:@STRENGTH',
+						}))
+						assert(client:settimeout(0, 'b'))
+					
+						self:log(3, 'waiting for handshake')
+						local result,reason
+						while not result do
+							-- TODO ... ThreadManager
+							--coroutine.yield()
+							result, reason = client:dohandshake()
+							self:log(3, 'client:dohandshake', result, reason)
+							if reason == 'wantread' then
+								socket.select(nil, {client})
+								-- and try again
+							elseif not result then
+								-- then error
+								error("handshake failed: "..tostring(reason))
+							end
+							if reason == 'unknown state' then
+								error('handshake conn in unknown state')
+							end
+							-- result == true and we can stop
+						end
+						self:log(3, 'got handshake')
+					end
+					self:log(1, 'got client!')
+					self.clients:insert(client)
+					self:log(1, 'total #clients',#self.clients)
+				end
 			end
 		end
 		for j=#self.clients,1,-1 do

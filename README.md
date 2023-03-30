@@ -58,3 +58,16 @@ wsapi simulation is enabled by default
 to disable wsapi simulation:
 
 `lua -e "wsapi=false" -lhttp`
+
+### Arguments
+
+```
+addr = addr to use, defaults to *,
+port = port number, defaults to 8000
+sslport = ssl port number, defaults to 8001
+block = true/false
+wsapi = true/false
+log = number for the log-level
+keyfile = ssl key file
+certfile = ssl cert file
+```
