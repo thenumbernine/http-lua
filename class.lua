@@ -9,6 +9,7 @@ local socket = require'socket'
 local url = require 'socket.url'
 local http = require 'socket.http'
 local MIMETypes = require 'mimetypes'
+local ThreadManager = require 'threadmanager'
 
 
 -- bcuz of a subclass that's hacking global print ...
@@ -29,6 +30,7 @@ args:
 	wsapi = whether to use wsapi emulation
 	config = where to store the mimetypes file
 	log = log level.  level 0 = none, 1 = only most serious, 2 3 etc = more and more information, all the way to infinity.
+	threads = (optional) ThreadManager.  if you provide one then you have to update it manually.
 --]]
 function HTTP:init(args)
 	args = args or {}
@@ -37,7 +39,7 @@ function HTTP:init(args)
 	self.mime = MIMETypes(config)
 
 	self.loglevel = args.log or 0
-	
+
 	self.servers = table()
 	local boundaddr, boundport
 
@@ -54,8 +56,8 @@ function HTTP:init(args)
 
 	local sslport = args.sslport or 8001	-- 443 ... or should I even listen on ssl by default?
 	if sslport or args.keyfile or args.certfile then
-		if sslport 
-		and args.keyfile 
+		if sslport
+		and args.keyfile
 		and args.certfile
 		then
 			self.keyfile = args.keyfile
@@ -74,7 +76,7 @@ function HTTP:init(args)
 			print('WARNING: for ssl to work you need to specify sslport, keyfile, certfile')
 		end
 	end
-	
+
 	self:log(3, '# server sockets '..tostring(#self.servers))
 
 	self.block = args.block
@@ -82,7 +84,7 @@ function HTTP:init(args)
 	-- I had some trouble with blocking and MathJax on android.  Maybe it was my imagination.
 	if self.block == nil then self.block = false end
 	self:log(1, "blocking? "..tostring(self.block))
-	
+
 	if self.block then
 		--[[ not necessary?
 		for _,server in ipairs{self.server, self.sslserver} do
@@ -102,13 +104,10 @@ function HTTP:init(args)
 		--]]
 	end
 
-
 	-- configuration specific to file handling
 	-- this stuff is not important if you are doing your own custom handlers
 
-
 	self.docroot = file:cwd()
-
 
 	-- whether to simulate wsapi for .lua pages
 	self.wsapi = args.wsapi
@@ -123,8 +122,14 @@ function HTTP:init(args)
 		}
 	end
 
-
 	self.clients = table()
+
+	-- if you provide external ThreadManager then it has to call :update() / coroutine.resume itself.
+	self.threads = args.threads
+	if not self.threads then
+		self.threads = ThreadManager()
+		self.ownThreads = true
+	end
 end
 
 function HTTP:log(level, ...)
@@ -374,19 +379,24 @@ function HTTP:handleRequest(...)
 	end)
 end
 
--- matches websocket ... soon these two will merge, and this whole project will have gotten out of hand
-function HTTP:receiveBlocking(conn, waitduration)
---	coroutine.yield()
+-- kinda matches websocket
+-- but using self.getTime instead of an override function
+-- and no coroutines yet
+-- and read amount (defaults to *l)
+-- soon these two will merge, and this whole project will have gotten out of hand
+function HTTP:receiveBlocking(conn, amount, waitduration)
+	amount = amount or '*l'
+	coroutine.yield()
 
 	local endtime
 	if waitduration then
-		endtime = secondsTimerFunc() + waitduration
+		endtime = self.getTime() + waitduration
 	end
 	local data
 	repeat
---		coroutine.yield()
+		coroutine.yield()
 		local reason
-		data, reason = conn:receive('*l')
+		data, reason = conn:receive(amount)
 		if not data then
 			if reason == 'wantread' then
 --self:log('got wantread, calling select...')
@@ -397,7 +407,7 @@ function HTTP:receiveBlocking(conn, waitduration)
 					return nil, reason		-- error() ?
 				end
 				-- else continue
-				if waitduration and secondsTimerFunc() > endtime then
+				if waitduration and self.getTime() > endtime then
 					return nil, 'timeout'
 				end
 			end
@@ -409,14 +419,12 @@ end
 
 function HTTP:handleClient(client)
 	local function readline()
-		local t = table.pack(client:receive())
-		self:log(1, 'got line', t:unpack(1,t.n))
-		if not t[1] then
-			--if t[2] ~= 'timeout' then
-				self:log(1, 'connection failed:',t:unpack(1,t.n))
-			--end
+		local t = table.pack(self:receiveBlocking(client))
+		local data = t:unpack()
+		if not data then
+			self:log(1, 'connection failed:', t:unpack())
 		end
-		return t:unpack(1,t.n)
+		return data
 	end
 
 	local request = readline()
@@ -457,7 +465,7 @@ function HTTP:handleClient(client)
 			else
 				self:log(1, 'reading POST '..postLen..' bytes')
 				--local postData = readline()
-				local postData = client:receive(postLen) or ''
+				local postData = self:receiveBlocking(client, postLen) or ''
 				self:log(1, 'read POST data: '..postData)
 				local contentType = string.trim(reqHeaders['content-type'])
 				if contentType == 'application/x-www-form-urlencoded' then
@@ -586,83 +594,91 @@ self:log(3, "about to handleRequest with "..tolua{GET=GET, POST=POST})
 	self:log(1, 'collectgarbage', collectgarbage())
 end
 
+function HTTP:connectCoroutine(client, server)
+	assert(client)
+	assert(server)
+
+	-- TODO for block as well
+	if server == self.sslserver then
+		-- from https://stackoverflow.com/questions/2833947/stuck-with-luasec-lua-secure-socket
+		-- TODO need to specify cert files
+		-- TODO but if you want to handle both https and non-https on different ports, that means two connections, that means better make non-blocking the default
+		--assert(client:settimeout(10))
+		self:log(3, 'ssl server calling ssl.wrap...')
+self:log(1, 'key file '..tostring(self.keyfile))
+self:log(1, 'cert file '..tostring(self.certfile))
+		local ssl = require 'ssl'	-- package luasec
+		client = assert(ssl.wrap(client, {
+			mode = 'server',
+			options = {'all'},
+			protocol = 'any',
+			key = assert(self.keyfile),
+			certificate = assert(self.certfile),
+			password = '12345',
+			ciphers = 'ALL:!ADH:@STRENGTH',
+		}))
+
+		if not self.block then
+			assert(client:settimeout(0, 'b'))
+		end
+
+		self:log(3, 'waiting for handshake')
+		local result,reason
+		while not result do
+			coroutine.yield()
+			result, reason = client:dohandshake()
+			self:log(3, 'client:dohandshake', result, reason)
+			if reason == 'wantread' then
+				socket.select(nil, {client})
+				-- and try again
+			elseif not result then
+				-- then error
+				error("handshake failed: "..tostring(reason))
+			end
+			if reason == 'unknown state' then
+				error('handshake conn in unknown state')
+			end
+			-- result == true and we can stop
+		end
+		self:log(3, 'got handshake')
+	end
+	self:log(1, 'got client!')
+	self.clients:insert(client)
+	self:log(1, 'total #clients',#self.clients)
+
+	self:handleClient(client)
+	self:log(1, 'closing client...')
+	client:close()
+	self.clients:removeObject(client)
+	self:log(2, '# clients remaining: '..#self.clients)
+end
+
 function HTTP:run()
 	while true do
-		local client
 		for _,server in ipairs(self.servers) do
 			if self.block then
 				-- blocking is easiest with single-server-socket impls
 				-- tho it had problems on android luasocket iirc
 				-- and now that i'm switching to ssl as well, ... gonna have problems
 				self:log(1, 'waiting for client...')
-				client = assert(server:accept())
+				local client = assert(server:accept())
 				self:log(1, 'got client!')
 				assert(client:settimeout(3600,'b'))
-				self.clients:insert(client)
-				self:log(1, 'total #clients',#self.clients)
+				self.threads:add(self.connectCoroutine, self, client, server)
 			else
-				client = server:accept()
+				local client = server:accept()
 				if client then
 					-- [[ should the client be non-blocking as well?  or can we assert the client will respond in time?
 					assert(client:setoption('keepalive',true))
 					assert(client:settimeout(0,'b'))
 					--]]
 					self:log(3, 'server:accept got ', client)
-					
-					-- TODO for block as well
-					if server == self.sslserver then
-						-- from https://stackoverflow.com/questions/2833947/stuck-with-luasec-lua-secure-socket
-						-- TODO need to specify cert files
-						-- TODO but if you want to handle both https and non-https on different ports, that means two connections, that means better make non-blocking the default
-						--assert(client:settimeout(10))
-						self:log(3, 'ssl server calling ssl.wrap...')
-self:log(1, 'key file '..tostring(self.keyfile))
-self:log(1, 'cert file '..tostring(self.certfile))
-						local ssl = require 'ssl'	-- package luasec
-						client = assert(ssl.wrap(client, {
-							mode = 'server',
-							options = {'all'},
-							protocol = 'any',
-							key = assert(self.keyfile),
-							certificate = assert(self.certfile),
-							password = '12345',
-							ciphers = 'ALL:!ADH:@STRENGTH',
-						}))
-						assert(client:settimeout(0, 'b'))
-					
-						self:log(3, 'waiting for handshake')
-						local result,reason
-						while not result do
-							-- TODO ... ThreadManager
-							--coroutine.yield()
-							result, reason = client:dohandshake()
-							self:log(3, 'client:dohandshake', result, reason)
-							if reason == 'wantread' then
-								socket.select(nil, {client})
-								-- and try again
-							elseif not result then
-								-- then error
-								error("handshake failed: "..tostring(reason))
-							end
-							if reason == 'unknown state' then
-								error('handshake conn in unknown state')
-							end
-							-- result == true and we can stop
-						end
-						self:log(3, 'got handshake')
-					end
-					self:log(1, 'got client!')
-					self.clients:insert(client)
-					self:log(1, 'total #clients',#self.clients)
+					self.threads:add(self.connectCoroutine, self, client, server)
 				end
 			end
 		end
-		for j=#self.clients,1,-1 do
-			client = self.clients[j]
-			self:handleClient(client)
-			self:log(1, 'closing client...')
-			client:close()
-			self.clients:remove(j)
+		if self.ownThreads then
+			self.threads:update()
 		end
 	end
 end

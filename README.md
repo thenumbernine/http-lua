@@ -3,18 +3,20 @@
 
 # Lua HTTP Server #
 
-- uses port 8000 by default.
+- uses port 8000 for http, 8001 for https by default.
 - runs out of the working directory
 - provides directory listings
 - caches mime types from iana.org into the file ~/.http.lua.conf
 
 ### Depends on: ###
 
+- ext: https://github.com/thenumbernine/lua-ext
+- csv: https://github.com/thenumbernine/lua-csv
+- template: https://github.com/thenumbernine/lua-template
+- mimetypes: https://github.com/thenumbernine/mimetypes-lua
+- threadmanager: https://github.com/thenumbernine/lua-threadmanager
 - luasocket: http://w3.impa.br/~diego/software/luasocket/
 - luafilesystem: https://keplerproject.github.io/luafilesystem/
-- lua-ext: https://github.com/thenumbernine/lua-ext
-- lua-csv: https://github.com/thenumbernine/lua-csv
-
 
 ### Usage: ###
 
@@ -59,15 +61,18 @@ to disable wsapi simulation:
 
 `lua -e "wsapi=false" -lhttp`
 
-### Arguments
+### Lua Class Arguments
 
-```
-addr = addr to use, defaults to *,
-port = port number, defaults to 8000
-sslport = ssl port number, defaults to 8001
-block = true/false
-wsapi = true/false
-log = number for the log-level
-keyfile = ssl key file
-certfile = ssl cert file
+``` lua
+require 'http.class'{
+	addr = addr to use, defaults to *,
+	port = port number, defaults to 8000
+	sslport = ssl port number, defaults to 8001
+	block = true/false
+	wsapi = true/false
+	log = number for the log-level
+	keyfile = ssl key file
+	certfile = ssl cert file
+	threads = override provide your own threadmanager.
+}
 ```
