@@ -627,7 +627,9 @@ self:log(1, 'cert file '..tostring(self.certfile))
 		while not result do
 			coroutine.yield()
 			result, reason = client:dohandshake()
-			self:log(3, 'client:dohandshake', result, reason)
+			if reason ~= 'wantread' then
+				self:log(3, 'client:dohandshake', result, reason)
+			end
 			if reason == 'wantread' then
 				socket.select(nil, {client})
 				-- and try again
