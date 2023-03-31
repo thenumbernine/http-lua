@@ -199,7 +199,7 @@ function HTTP:handleDirectory(
 	headers
 )
 	headers['content-type'] = 'text/html'
-	return '200/OK', coroutine.wrap(function()
+	return '200 OK', coroutine.wrap(function()
 
 		local files = table()
 		for f in file(localfilename):dir() do
@@ -266,7 +266,7 @@ function HTTP:handleFile(
 			localfilename:sub(-7) == '.js.lua'
 			and self.mime.types.js
 			or self.mime.types.html
-		return '200/OK', coroutine.wrap(function()
+		return '200 OK', coroutine.wrap(function()
 			coroutine.yield(template(result, {
 				env = {
 					--SERVER_NAME = os.getenv'HOSTNAME',
@@ -308,13 +308,13 @@ function HTTP:handleFile(
 			k = k:lower()
 			if not headers[k] then headers[k] = v end
 		end
-		if status == 200 then status = status .. '/OK' end
+		if status == 200 then status = status .. ' OK' end
 		return status, callback
 	end
 
 	self:log(1, 'serving file',filename)
 	headers['content-type'] = ext and self.mime.types[ext:lower()] or 'application/octet-stream'
-	return '200/OK', coroutine.wrap(function()
+	return '200 OK', coroutine.wrap(function()
 		coroutine.yield(file(localfilename):read())
 	end)
 end
