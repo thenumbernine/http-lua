@@ -1,3 +1,6 @@
+--[[
+This is starting to have a lot in common with 'websocket'
+--]]
 local file = require 'ext.file'
 local table = require 'ext.table'
 local os = require 'ext.os'
@@ -14,7 +17,6 @@ local ThreadManager = require 'threadmanager'
 
 -- bcuz of a subclass that's hacking global print ...
 local print = print
-
 
 local HTTP = class()
 
@@ -129,6 +131,32 @@ function HTTP:init(args)
 	if not self.threads then
 		self.threads = ThreadManager()
 		self.ownThreads = true
+	end
+end
+
+function HTTP:send(conn, data)
+	self:log(10, conn, '<<', tolua(data))
+	local i = 1
+	while true do
+		-- conn:send() successful response will be numberBytesSent, nil, nil, time
+		-- conn:send() failed response will be nil, 'wantwrite', numBytesSent, time
+		-- socket.send lets you use i,j as substring args, but does luasec's ssl.wrap?
+		local successlen, reason, faillen, time = conn:send(data:sub(i))
+		self:log(10, conn, '...', successlen, reason, faillen, time)
+		self:log(10, conn, '...getstats()', conn:getstats())
+		if successlen ~= nil then
+			assert(reason ~= 'wantwrite')	-- will wantwrite get set only if res[1] is nil?
+			self:log(10, conn, '...done sending')
+			return successlen, reason, faillen, time
+		end
+		if reason ~= 'wantwrite' then
+			return nil, reason, faillen, time
+		end
+		--socket.select({conn}, nil)	-- not good?
+		-- try again
+		i = i + faillen
+		self:log(10, conn, 'sending from offset '..i)
+		coroutine.yield()
 	end
 end
 
@@ -379,12 +407,11 @@ function HTTP:handleRequest(...)
 	end)
 end
 
+-- this is coroutine-blocking
 -- kinda matches websocket
--- but using self.getTime instead of an override function
--- and no coroutines yet
--- and read amount (defaults to *l)
+-- but it has read amount (defaults to *l)
 -- soon these two will merge, and this whole project will have gotten out of hand
-function HTTP:receiveBlocking(conn, amount, waitduration)
+function HTTP:receive(conn, amount, waitduration)
 	amount = amount or '*l'
 	coroutine.yield()
 
@@ -394,40 +421,39 @@ function HTTP:receiveBlocking(conn, amount, waitduration)
 	end
 	local data
 	repeat
-		coroutine.yield()
 		local reason
 		data, reason = conn:receive(amount)
-		if not data then
-			if reason == 'wantread' then
---self:log('got wantread, calling select...')
-				socket.select(nil, {conn})
---self:log('...done calling select')
-			else
-				if reason ~= 'timeout' then
-					return nil, reason		-- error() ?
-				end
-				-- else continue
-				if waitduration and self.getTime() > endtime then
-					return nil, 'timeout'
-				end
+		self:log(10, conn, '...getstats()', conn:getstats())
+		if reason == 'wantread' then
+			-- can we have data AND wantread?
+			assert(not data, "FIXME I haven't considered wantread + already-read data")
+			--self:log(10, 'got wantread, calling select...')
+			socket.select(nil, {conn})
+			--self:log(10, '...done calling select')
+			-- and try again
+		else
+			-- do this after wantread cuz wantread status will be hit mannnnnyyy times
+			self:log(10, conn, '...', data, reason)
+			self:log(10, conn, '...getstats()', conn:getstats())
+			if data then
+				self:log(10, conn, '>>', tolua(data))
+				return data
+			end		
+			if reason ~= 'timeout' then
+				self:log(10, 'connection failed:', reason)
+				return nil, reason		-- error() ?
+			end
+			-- else continue
+			if waitduration and self.getTime() > endtime then
+				return nil, 'timeout'
 			end
 		end
+		coroutine.yield()
 	until data ~= nil
-
-	return data
 end
 
 function HTTP:handleClient(client)
-	local function readline()
-		local t = table.pack(self:receiveBlocking(client))
-		local data = t:unpack()
-		if not data then
-			self:log(1, 'connection failed:', t:unpack())
-		end
-		return data
-	end
-
-	local request = readline()
+	local request = self:receive(client)
 	if not request then return end
 
 	xpcall(function()
@@ -444,7 +470,7 @@ function HTTP:handleClient(client)
 		elseif method == 'post' then
 			reqHeaders = {}
 			while true do
-				local line = readline()
+				local line = self:receive(client)
 				if not line then break end
 				line = string.trim(line)
 				if line == '' then
@@ -464,8 +490,7 @@ function HTTP:handleClient(client)
 				self:log(0, "didn't get POST data length")
 			else
 				self:log(1, 'reading POST '..postLen..' bytes')
-				--local postData = readline()
-				local postData = self:receiveBlocking(client, postLen) or ''
+				local postData = self:receive(client, postLen) or ''
 				self:log(1, 'read POST data: '..postData)
 				local contentType = string.trim(reqHeaders['content-type'])
 				if contentType == 'application/x-www-form-urlencoded' then
@@ -549,7 +574,7 @@ function HTTP:handleClient(client)
 			error("unknown method: "..method)
 		end
 
-self:log(3, "about to handleRequest with "..tolua{GET=GET, POST=POST})
+		self:log(3, "about to handleRequest with "..tolua{GET=GET, POST=POST})
 
 		filename = url.unescape(filename:gsub('%+','%%20'))
 		local base, GET = filename:match('(.-)%?(.*)')
@@ -568,23 +593,19 @@ self:log(3, "about to handleRequest with "..tolua{GET=GET, POST=POST})
 				POST
 			)
 
-			local function send(s)
-				self:log(10, 'sending '..s)
-				return client:send(s)
-			end
-			assert(send('HTTP/1.1 '..status..'\r\n'))
+			assert(self:send(client, 'HTTP/1.1 '..status..'\r\n'))
 			for k,v in pairs(headers) do
-				assert(send(k..': '..v..'\r\n'))
+				assert(self:send(client, k..': '..v..'\r\n'))
 			end
-			assert(send'\r\n')
+			assert(self:send(client, '\r\n'))
 			if callback then
 				self:log(10, 'wsapi started writing')
 				for str in callback do
-					assert(send(str))
+					assert(self:send(client, str))
 				end
 				self:log(10, 'wsapi done writing')
 			else
-				assert(send[[someone forgot to set a callback!]])
+				assert(self:send(client, [[someone forgot to set a callback!]]))
 			end
 		end
 	end, function(err)
@@ -595,8 +616,12 @@ self:log(3, "about to handleRequest with "..tolua{GET=GET, POST=POST})
 end
 
 function HTTP:connectCoroutine(client, server)
+	self:log(1, 'got connection!', client)
 	assert(client)
 	assert(server)
+	self:log(2, 'connection from', client:getpeername())
+	self:log(2, 'connection to', server:getsockname())
+	self:log(2, 'spawning new thread...')
 
 	-- TODO for block as well
 	if server == self.sslserver then
@@ -605,8 +630,8 @@ function HTTP:connectCoroutine(client, server)
 		-- TODO but if you want to handle both https and non-https on different ports, that means two connections, that means better make non-blocking the default
 		--assert(client:settimeout(10))
 		self:log(3, 'ssl server calling ssl.wrap...')
-self:log(1, 'key file '..tostring(self.keyfile))
-self:log(1, 'cert file '..tostring(self.certfile))
+		self:log(1, 'key file '..tostring(self.keyfile))
+		self:log(1, 'cert file '..tostring(self.certfile))
 		local ssl = require 'ssl'	-- package luasec
 		client = assert(ssl.wrap(client, {
 			mode = 'server',
@@ -664,7 +689,6 @@ function HTTP:run()
 				-- and now that i'm switching to ssl as well, ... gonna have problems
 				self:log(1, 'waiting for client...')
 				local client = assert(server:accept())
-				self:log(1, 'got client!')
 				assert(client:settimeout(3600,'b'))
 				self.threads:add(self.connectCoroutine, self, client, server)
 			else
@@ -674,7 +698,6 @@ function HTTP:run()
 					assert(client:setoption('keepalive',true))
 					assert(client:settimeout(0,'b'))
 					--]]
-					self:log(3, 'server:accept got ', client)
 					self.threads:add(self.connectCoroutine, self, client, server)
 				end
 			end
