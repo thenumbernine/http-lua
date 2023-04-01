@@ -423,6 +423,7 @@ function HTTP:receive(conn, amount, waitduration)
 	repeat
 		local reason
 		data, reason = conn:receive(amount)
+		self:log(10, conn, '...', data, reason)
 		self:log(10, conn, '...getstats()', conn:getstats())
 		if reason == 'wantread' then
 			-- can we have data AND wantread?
@@ -432,9 +433,6 @@ function HTTP:receive(conn, amount, waitduration)
 			--self:log(10, '...done calling select')
 			-- and try again
 		else
-			-- do this after wantread cuz wantread status will be hit mannnnnyyy times
-			self:log(10, conn, '...', data, reason)
-			self:log(10, conn, '...getstats()', conn:getstats())
 			if data then
 				self:log(10, conn, '>>', tolua(data))
 				return data
@@ -443,10 +441,11 @@ function HTTP:receive(conn, amount, waitduration)
 				self:log(10, 'connection failed:', reason)
 				return nil, reason		-- error() ?
 			end
-			-- else continue
+			-- else check timeout
 			if waitduration and self.getTime() > endtime then
 				return nil, 'timeout'
 			end
+			-- continue
 		end
 		coroutine.yield()
 	until data ~= nil
