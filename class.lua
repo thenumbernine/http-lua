@@ -492,7 +492,19 @@ function HTTP:handleClient(client)
 				local postData = self:receive(client, postLen) or ''
 				self:log(1, 'read POST data: '..postData)
 				local contentType = string.trim(reqHeaders['content-type'])
-				if contentType == 'application/x-www-form-urlencoded' then
+				local contentTypeParts = string.split(contentType, ';'):mapi(function(s) return string.trim(s) end)
+				local contentTypePartsMap = {}	-- first one is the content-type, rest are key=value
+				for _,part in ipairs(contentTypeParts) do
+					local k, v = part:match'([^=]*)=(.*)'
+					if not k then
+						self:log(0, 'got unknown contentType part '..part)
+					else
+						k = string.trim(k):lower()	-- case-insensitive right?
+						v = string.trim(v)
+						contentTypePartsMap[k] = v
+					end
+				end
+				if contentTypeParts[1] == 'application/x-www-form-urlencoded' then
 					self:log(2, "splitting up post...")
 					POST = string.split(postData, '&'):mapi(function(kv, _, t)
 						local k, v = kv:match'([^=]*)=(.*)'
@@ -510,10 +522,8 @@ function HTTP:handleClient(client)
 						self:log(10, 'after unescape, k='..k..' v='..v)
 						return v, k
 					end)
-				elseif contentType:match('^'..string.patescape('multipart/form-data')) then
-					-- TODO technically  I should be splitting this line by ; and then making a key=value map out of it
-					local boundary = contentType:match('^'..string.patescape('multipart/form-data')..'; boundary=(.*)')
-					boundary = string.trim(boundary)
+				elseif contentTypeParts[1] == 'multipart/form-data' then
+					local boundary = contentTypePartsMap.boundary
 					local parts = string.split(postData, string.patescape('--'..boundary))
 					assert(parts:remove(1) == '')
 					POST = {}
@@ -564,7 +574,7 @@ function HTTP:handleClient(client)
 						POST[thisPostVar.name].body = data
 					end
 				else
-					self:log(1, "what to do with post an our content-type "..tostring(contentType))
+					self:log(1, "what to do with post and our content-type "..tostring(contentType))
 					POST = postData
 				end
 			end
