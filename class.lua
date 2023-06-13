@@ -298,6 +298,7 @@ function HTTP:handleFile(
 			coroutine.yield(template(result, {
 				env = {
 					--SERVER_NAME = os.getenv'HOSTNAME',
+					SERVER_NAME = 'localhost', --os.getenv'HOSTNAME',
 					SCRIPT_FILENAME = localfilename,
 					GET = self:makeGETTable(GET),
 					POST = POST,
