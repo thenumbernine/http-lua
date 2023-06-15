@@ -325,7 +325,7 @@ function HTTP:handleFile(
 			io.stderr:write(require 'template.showcode'(result),'\n')
 			error(err)
 		end
-		local fn = assert(f())
+		local fn = assert((f()))
 		local status, headers2, callback = fn.run{
 			reqHeaders = reqHeaders,
 			GET = self:makeGETTable(GET),
