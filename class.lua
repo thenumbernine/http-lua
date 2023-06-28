@@ -13,6 +13,7 @@ local url = require 'socket.url'
 local http = require 'socket.http'
 local MIMETypes = require 'mimetypes'
 local ThreadManager = require 'threadmanager'
+local json = require 'dkjson'
 
 
 -- bcuz of a subclass that's hacking global print ...
@@ -482,7 +483,9 @@ function HTTP:handleClient(client)
 					self:log(1, "got invalid header line: "..line)
 					break
 				end
+				v = string.trim(v)
 				reqHeaders[k:lower()] = v
+				self:log(3, "reqHeaders["..tolua(k:lower()).."] = "..tolua(v))
 			end
 
 			local postLen = tonumber(reqHeaders['content-length'])
@@ -505,7 +508,9 @@ function HTTP:handleClient(client)
 						contentTypePartsMap[k] = v
 					end
 				end
-				if contentTypeParts[1] == 'application/x-www-form-urlencoded' then
+				if contentTypeParts[1] == 'application/json' then
+					POST = json.decode(postData)
+				elseif contentTypeParts[1] == 'application/x-www-form-urlencoded' then
 					self:log(2, "splitting up post...")
 					POST = string.split(postData, '&'):mapi(function(kv, _, t)
 						local k, v = kv:match'([^=]*)=(.*)'
