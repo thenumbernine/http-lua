@@ -1,7 +1,7 @@
 --[[
 This is starting to have a lot in common with 'websocket'
 --]]
-local file = require 'ext.file'
+local path = require 'ext.path'
 local table = require 'ext.table'
 local os = require 'ext.os'
 local class = require 'ext.class'
@@ -65,8 +65,8 @@ function HTTP:init(args)
 		then
 			self.keyfile = args.keyfile
 			self.certfile = args.certfile
-			assert(file(self.keyfile):exists(), "failed to find keyfile "..self.keyfile)
-			assert(file(self.certfile):exists(), "failed to find certfile "..self.certfile)
+			assert(path(self.keyfile):exists(), "failed to find keyfile "..self.keyfile)
+			assert(path(self.certfile):exists(), "failed to find certfile "..self.certfile)
 			self:log(3, "bind ssl addr port "..tostring(addr)..':'..tostring(sslport))
 			self.sslserver = assert(socket.bind(addr, sslport))
 			self.servers:insert(self.sslserver)
@@ -110,7 +110,7 @@ function HTTP:init(args)
 	-- configuration specific to file handling
 	-- this stuff is not important if you are doing your own custom handlers
 
-	self.docroot = file:cwd()
+	self.docroot = path:cwd()
 
 	-- whether to simulate wsapi for .lua pages
 	self.wsapi = args.wsapi
@@ -169,7 +169,7 @@ end
 function HTTP:findDontInterpret(docroot, remotePath)
 	self:log(10, "looking for dontinterpret at docroot='"..docroot.."' remotePath='"..remotePath.."'")
 	local localPath = docroot .. remotePath
-	local dir = file(localPath):getdir()
+	local dir = path(localPath):getdir()
 	local docrootparts = string.split(docroot, '/')
 	local dirparts = string.split(dir, '/')
 	for i=1,#docrootparts do
@@ -178,7 +178,7 @@ function HTTP:findDontInterpret(docroot, remotePath)
 	for i=#dirparts,#docrootparts,-1 do
 		local check = table.concat({table.unpack(dirparts,1,i)}, '/')..'/.dontinterpret'
 		self:log(10, "checking file '"..check.."'")
-		if file(check):exists() then
+		if path(check):exists() then
 			self:log(10, "found .dontinterpret")
 			return true
 		end
@@ -204,7 +204,7 @@ function HTTP:handleDirectoryTemplate()
 			</tr>
 <? for _,f in ipairs(files) do
 	local displayfile = f
-	local subattr = file(localfilename..'/'..f):attr()
+	local subattr = path(localfilename..'/'..f):attr()
 	if subattr and subattr.mode == 'directory' then
 		displayfile = '[' .. displayfile .. ']'
 	end
@@ -231,7 +231,7 @@ function HTTP:handleDirectory(
 	return '200 OK', coroutine.wrap(function()
 
 		local files = table()
-		for f in file(localfilename):dir() do
+		for f in path(localfilename):dir() do
 			if f ~= '.' then
 				files:insert(f)
 			end
@@ -242,7 +242,7 @@ function HTTP:handleDirectory(
 			template(
 				self:handleDirectoryTemplate(),
 				{
-					file = file,
+					path = path,
 					files = files,
 					localfilename = localfilename,
 					filename = filename,
@@ -272,9 +272,9 @@ function HTTP:handleFile(
 	GET,
 	POST
 )
-	local result = file(localfilename):read()
+	local result = path(localfilename):read()
 	if not result then
-		self:log(1, 'from dir '..file:cwd()..' failed to read file at', localfilename)
+		self:log(1, 'from dir '..path:cwd()..' failed to read file at', localfilename)
 		return '403 Forbidden', coroutine.wrap(function()
 			coroutine.yield('failed to read file '..filename)
 		end)
@@ -290,7 +290,7 @@ function HTTP:handleFile(
 		or localfilename:sub(-7) == '.js.lua'
 	) then
 		self:log(1, 'running templated script',filename)
-		assert(file(dir):cd())
+		assert(path(dir):cd())
 		headers['content-type'] =
 			localfilename:sub(-7) == '.js.lua'
 			and self.mime.types.js
@@ -313,7 +313,7 @@ function HTTP:handleFile(
 	and not dontinterpret
 	then
 		self:log(1, 'running script',filename)
-		assert(file(dir):cd())
+		assert(path(dir):cd())
 
 		-- trim off the linux executable stuff that lua interpreter usually does for me
 		if result:sub(1,2) == '#!' then
@@ -345,7 +345,7 @@ function HTTP:handleFile(
 	self:log(1, 'serving file',filename)
 	headers['content-type'] = ext and self.mime.types[ext:lower()] or 'application/octet-stream'
 	return '200 OK', coroutine.wrap(function()
-		coroutine.yield(file(localfilename):read())
+		coroutine.yield(path(localfilename):read())
 	end)
 end
 
@@ -375,7 +375,7 @@ function HTTP:handleRequest(...)
 
 		local localfilename = (searchdir..'/'..filename):gsub('/+', '/')
 
-		local attr = file(localfilename):attr()
+		local attr = path(localfilename):attr()
 		if attr then
 			if attr.mode == 'directory' then
 				self:log(1, 'serving directory',filename)
@@ -383,8 +383,8 @@ function HTTP:handleRequest(...)
 			end
 
 			-- handle file:
-			local _,ext = file(localfilename):getext()
-			local dirforfile, _ = file(localfilename):getdir()
+			local _,ext = path(localfilename):getext()
+			local dirforfile, _ = path(localfilename):getdir()
 			self:log(1, 'ext', ext)
 			self:log(1, 'dirforfile', dirforfile)
 
@@ -626,7 +626,7 @@ function HTTP:handleClient(client)
 	end, function(err)
 		io.stderr:write(err..'\n'..debug.traceback()..'\n')
 	end)
-	assert(file(self.docroot):cd())
+	assert(path(self.docroot):cd())
 	self:log(1, 'collectgarbage', collectgarbage())
 end
 
