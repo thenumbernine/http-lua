@@ -298,6 +298,7 @@ function HTTP:handleFile(
 		return '200 OK', coroutine.wrap(function()
 			coroutine.yield(template(result, {
 				env = {
+					DOCUMENT_ROOT = self.docroot,
 					--SERVER_NAME = os.getenv'HOSTNAME',
 					SERVER_NAME = 'localhost', --os.getenv'HOSTNAME',
 					SCRIPT_FILENAME = localfilename,
@@ -332,6 +333,8 @@ function HTTP:handleFile(
 			GET = self:makeGETTable(GET),
 			POST = POST,
 			-- wsapi variables:
+			DOCUMENT_ROOT = self.docroot,
+			SERVER_NAME = 'localhost', --os.getenv'HOSTNAME',
 			SCRIPT_FILENAME = localfilename,
 		}
 		for k,v in pairs(headers2) do
