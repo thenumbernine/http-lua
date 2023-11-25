@@ -171,7 +171,7 @@ function HTTP:findDontInterpret(docroot, remotePath)
 	local localPath = docroot .. remotePath
 	local dir = path(localPath):getdir()
 	local docrootparts = string.split(docroot, '/')
-	local dirparts = string.split(dir, '/')
+	local dirparts = string.split(dir.path, '/')
 	for i=1,#docrootparts do
 		assert(docrootparts[i] == dirparts[i])
 	end
@@ -389,13 +389,13 @@ function HTTP:handleRequest(...)
 			local _,ext = path(localfilename):getext()
 			local dirforfile, _ = path(localfilename):getdir()
 			self:log(1, 'ext', ext)
-			self:log(1, 'dirforfile', dirforfile)
+			self:log(1, 'dirforfile', dirforfile.path)
 
 			return self:handleFile(
 				filename,
 				localfilename,
 				ext,
-				dirforfile,
+				dirforfile.path,
 				headers,
 				reqHeaders,
 				GET,
