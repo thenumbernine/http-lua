@@ -110,7 +110,7 @@ function HTTP:init(args)
 	-- configuration specific to file handling
 	-- this stuff is not important if you are doing your own custom handlers
 
-	self.docroot = path:cwd()
+	self.docroot = path:cwd().path
 
 	-- whether to simulate wsapi for .lua pages
 	self.wsapi = args.wsapi
