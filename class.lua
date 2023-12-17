@@ -232,8 +232,8 @@ function HTTP:handleDirectory(
 
 		local files = table()
 		for f in path(localfilename):dir() do
-			if f ~= '.' then
-				files:insert(f)
+			if f.path ~= '.' then
+				files:insert(f.path)
 			end
 		end
 		files:sort(function (a,b) return a:lower() < b:lower() end)
