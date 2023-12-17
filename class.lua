@@ -377,8 +377,8 @@ function HTTP:handleRequest(...)
 		self:log(1, "searching in dir "..searchdir)
 
 		local localfilename = (searchdir..'/'..filename):gsub('/+', '/')
-
-		local attr = path(localfilename):attr()
+		local localfilepath = path(localfilename)
+		local attr = localfilepath:attr()
 		if attr then
 			if attr.mode == 'directory' then
 				self:log(1, 'serving directory',filename)
@@ -386,8 +386,8 @@ function HTTP:handleRequest(...)
 			end
 
 			-- handle file:
-			local _,ext = path(localfilename):getext()
-			local dirforfile, _ = path(localfilename):getdir()
+			local _,ext = localfilepath:getext()
+			local dirforfile, _ = localfilepath:getdir()
 			self:log(1, 'ext', ext)
 			self:log(1, 'dirforfile', dirforfile.path)
 
