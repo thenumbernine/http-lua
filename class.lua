@@ -273,6 +273,7 @@ function HTTP:handleFile(
 	POST
 )
 	local localfilepath = path(localfilename)
+
 	local result = localfilepath:read()
 	if not result then
 		self:log(1, 'from dir '..path:cwd()..' failed to read file at', localfilename)
@@ -297,18 +298,22 @@ function HTTP:handleFile(
 		self:log(1, 'running templated script',filename)
 		assert(path(dir):cd())
 		headers['content-type'] = self.mime.types[ext2]
+
+		local processed = template(result, {
+			headers = headers,	-- TODO what a more conventional way to pass templated lua pages the header table?
+			env = {
+				DOCUMENT_ROOT = self.docroot,
+				--SERVER_NAME = os.getenv'HOSTNAME',
+				SERVER_NAME = 'localhost', --os.getenv'HOSTNAME',
+				SCRIPT_FILENAME = localfilename,
+				GET = self:makeGETTable(GET),
+				POST = POST,
+			},
+		})
+		headers['content-length'] = #processed
+
 		return '200 OK', coroutine.wrap(function()
-			coroutine.yield(template(result, {
-				headers = headers,	-- TODO what a more conventional way to pass templated lua pages the header table?
-				env = {
-					DOCUMENT_ROOT = self.docroot,
-					--SERVER_NAME = os.getenv'HOSTNAME',
-					SERVER_NAME = 'localhost', --os.getenv'HOSTNAME',
-					SCRIPT_FILENAME = localfilename,
-					GET = self:makeGETTable(GET),
-					POST = POST,
-				},
-			}))
+			coroutine.yield(processed)
 		end)
 	end
 
@@ -348,10 +353,11 @@ function HTTP:handleFile(
 		return status, callback
 	end
 
-	self:log(1, 'serving file',filename)
+	self:log(1, 'serving file', filename)
 	headers['content-type'] = ext and self.mime.types[ext:lower()] or 'application/octet-stream'
+	headers['content-length'] = #result
 	return '200 OK', coroutine.wrap(function()
-		coroutine.yield(path(localfilename):read())
+		coroutine.yield(result)
 	end)
 end
 
@@ -444,7 +450,7 @@ function HTTP:receive(conn, amount, waitduration)
 			if data then
 				self:log(10, conn, '>>', tolua(data))
 				return data
-			end	
+			end
 			if reason ~= 'timeout' then
 				self:log(10, 'connection failed:', reason)
 				return nil, reason		-- error() ?
