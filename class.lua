@@ -299,6 +299,7 @@ function HTTP:handleFile(
 		headers['content-type'] = self.mime.types[ext2]
 		return '200 OK', coroutine.wrap(function()
 			coroutine.yield(template(result, {
+				headers = headers,	-- TODO what a more conventional way to pass templated lua pages the header table?
 				env = {
 					DOCUMENT_ROOT = self.docroot,
 					--SERVER_NAME = os.getenv'HOSTNAME',
