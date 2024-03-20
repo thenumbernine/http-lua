@@ -272,7 +272,8 @@ function HTTP:handleFile(
 	GET,
 	POST
 )
-	local result = path(localfilename):read()
+	local localfilepath = path(localfilename)
+	local result = localfilepath:read()
 	if not result then
 		self:log(1, 'from dir '..path:cwd()..' failed to read file at', localfilename)
 		return '403 Forbidden', coroutine.wrap(function()
@@ -285,16 +286,17 @@ function HTTP:handleFile(
 		filename)
 	self:log(1, 'dontinterpret?', dontinterpret)
 
-	if self.wsapi and (
-		localfilename:sub(-9) == '.html.lua'
-		or localfilename:sub(-7) == '.js.lua'
-	) then
+	local base, ext1 = localfilepath:getext()
+	local ext2
+	base, ext2 = base:getext()
+
+	if self.wsapi
+	and ext1 == 'lua'
+	and ext
+	then
 		self:log(1, 'running templated script',filename)
 		assert(path(dir):cd())
-		headers['content-type'] =
-			localfilename:sub(-7) == '.js.lua'
-			and self.mime.types.js
-			or self.mime.types.html
+		headers['content-type'] = self.mime.types[ext2]
 		return '200 OK', coroutine.wrap(function()
 			coroutine.yield(template(result, {
 				env = {
@@ -441,7 +443,7 @@ function HTTP:receive(conn, amount, waitduration)
 			if data then
 				self:log(10, conn, '>>', tolua(data))
 				return data
-			end		
+			end	
 			if reason ~= 'timeout' then
 				self:log(10, 'connection failed:', reason)
 				return nil, reason		-- error() ?
