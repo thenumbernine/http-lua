@@ -292,7 +292,7 @@ function HTTP:handleFile(
 
 	if self.wsapi
 	and ext1 == 'lua'
-	and ext
+	and ext2
 	then
 		self:log(1, 'running templated script',filename)
 		assert(path(dir):cd())
