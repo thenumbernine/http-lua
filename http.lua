@@ -13,6 +13,7 @@ local http = HTTP{
 	block = _G.block or cmdline.block,
 	wsapi = _G.wsapi or cmdline.wsapi,
 	log = _G.log or cmdline.log,
+	enableDirectoryListing = _G.enableDirectoryListing or cmdline.enableDirectoryListing,
 }
 
 http:run()

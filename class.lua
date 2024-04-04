@@ -21,6 +21,8 @@ local print = print
 
 local HTTP = class()
 
+HTTP.enableDirectoryListing = true
+
 --[[
 args:
 	addr = address to bind to, default *
@@ -34,6 +36,7 @@ args:
 	config = where to store the mimetypes file
 	log = log level.  level 0 = none, 1 = only most serious, 2 3 etc = more and more information, all the way to infinity.
 	threads = (optional) ThreadManager.  if you provide one then you have to update it manually.
+	enableDirectoryListing = (optional) set to 'false' to disable, otherwise default is 'true'
 --]]
 function HTTP:init(args)
 	args = args or {}
@@ -42,6 +45,8 @@ function HTTP:init(args)
 	self.mime = MIMETypes(config)
 
 	self.loglevel = args.log or 0
+
+	self.enableDirectoryListing = args.enableDirectoryListing
 
 	self.servers = table()
 	local boundaddr, boundport
@@ -227,6 +232,12 @@ function HTTP:handleDirectory(
 	localfilename,
 	headers
 )
+	if not self.enableDirectoryListing then
+		return '404 Not Found', coroutine.wrap(function()
+			coroutine.yield('failed to find file '..filename)
+		end)
+	end
+
 	headers['content-type'] = 'text/html'
 	return '200 OK', coroutine.wrap(function()
 
