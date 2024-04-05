@@ -663,7 +663,7 @@ function HTTP:connectCoroutine(client, server)
 	self:log(2, 'connection to', server:getsockname())
 	self:log(2, 'spawning new thread...')
 
-	if self.allowFrom and not self.allowFrom:match(clientaddr) then
+	if self.allowFrom and not clientaddr:match(self.allowFrom) then
 		self:log(1, 'blocking connection from', clientaddr)
 		client:close()
 		return
