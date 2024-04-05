@@ -209,7 +209,8 @@ function HTTP:handleDirectoryTemplate()
 			</tr>
 <? for _,f in ipairs(files) do
 	local displayfile = f
-	local subattr = path(localfilename..'/'..f):attr()
+	local subpath = path(localfilename..'/'..f)
+	local subattr = subpath.attr and subpath:attr()
 	if subattr and subattr.mode == 'directory' then
 		displayfile = '[' .. displayfile .. ']'
 	end
@@ -398,7 +399,7 @@ function HTTP:handleRequest(...)
 
 		local localfilename = (searchdir..'/'..filename):gsub('/+', '/')
 		local localfilepath = path(localfilename)
-		local attr = localfilepath:attr()
+		local attr = localfilepath.attr and localfilepath:attr()
 		if attr then
 			if attr.mode == 'directory' then
 				self:log(1, 'serving directory',filename)
