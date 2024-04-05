@@ -47,6 +47,7 @@ function HTTP:init(args)
 	self.loglevel = args.log or 0
 
 	self.enableDirectoryListing = args.enableDirectoryListing
+print('self.enableDirectoryListing', self.enableDirectoryListing)
 
 	self.servers = table()
 	local boundaddr, boundport
@@ -233,10 +234,9 @@ function HTTP:handleDirectory(
 	localfilename,
 	headers
 )
+print('self.enableDirectoryListing', self.enableDirectoryListing)
 	if not self.enableDirectoryListing then
-		return '404 Not Found', coroutine.wrap(function()
-			coroutine.yield('failed to find file '..filename)
-		end)
+		return '404 Not Found', coroutine.wrap(function() end)
 	end
 
 	headers['content-type'] = 'text/html'
