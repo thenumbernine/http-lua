@@ -36,6 +36,7 @@ args:
 	config = where to store the mimetypes file
 	log = log level.  level 0 = none, 1 = only most serious, 2 3 etc = more and more information, all the way to infinity.
 	threads = (optional) ThreadManager.  if you provide one then you have to update it manually.
+	allowFrom = (optional) string of what addresses to allow connections from, uses Lua pattern matching.
 	enableDirectoryListing = (optional) set to 'false' to disable, otherwise default is 'true'
 --]]
 function HTTP:init(args)
@@ -44,10 +45,9 @@ function HTTP:init(args)
 	local config = args.config or os.home()..'/.http.lua.conf'
 	self.mime = MIMETypes(config)
 
-	self.loglevel = args.log or 0
-
+	self.loglevel = args.log or 0	-- TODO replace with ext.debug ?
+	self.allowFrom = args.allowFrom
 	self.enableDirectoryListing = args.enableDirectoryListing
-print('self.enableDirectoryListing', self.enableDirectoryListing)
 
 	self.servers = table()
 	local boundaddr, boundport
@@ -658,9 +658,16 @@ function HTTP:connectCoroutine(client, server)
 	self:log(1, 'got connection!', client)
 	assert(client)
 	assert(server)
-	self:log(2, 'connection from', client:getpeername())
+	local clientaddr = client:getpeername()
+	self:log(2, 'connection from', clientaddr)
 	self:log(2, 'connection to', server:getsockname())
 	self:log(2, 'spawning new thread...')
+
+	if self.allowFrom and not self.allowFrom:match(clientaddr) then
+		self:log(1, 'blocking connection from', clientaddr)
+		client:close()
+		return
+	end
 
 	-- TODO for block as well
 	if server == self.sslserver then

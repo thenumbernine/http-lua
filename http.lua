@@ -17,6 +17,7 @@ local http = HTTP{
 	wsapi = _G.wsapi or cmdline.wsapi,
 	log = _G.log or cmdline.log,
 	enableDirectoryListing = enableDirectoryListing,
+	allowFrom = _G.allowFrom or cmdline.allowFrom,
 }
 
 http:run()
