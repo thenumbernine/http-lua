@@ -1,4 +1,8 @@
 #!/usr/bin/env lua
+-- TODO how about instead to match namespaces / requires elsewhere
+-- how about rename http.class => http.http
+-- and rename this file http.http => http.run ?
+
 local HTTP = require 'http.class'
 local cmdline = require 'ext.cmdline'(...)
 
