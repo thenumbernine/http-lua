@@ -737,6 +737,13 @@ function HTTP:run()
 				local client = assert(server:accept())
 				assert(client:settimeout(3600,'b'))
 				self.threads:add(self.connectCoroutine, self, client, server)
+
+				-- if we're blocking for connections then we will want all threads to finish before we try to block ... otherwise they won't finish.
+				if self.ownThreads then
+					while #self.threads.threads > 0 do
+						self.threads:update()
+					end
+				end
 			else
 				local client = server:accept()
 				if client then
@@ -746,10 +753,10 @@ function HTTP:run()
 					--]]
 					self.threads:add(self.connectCoroutine, self, client, server)
 				end
+				if self.ownThreads then
+					self.threads:update()
+				end
 			end
-		end
-		if self.ownThreads then
-			self.threads:update()
 		end
 	end
 end
