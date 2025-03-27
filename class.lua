@@ -91,7 +91,7 @@ function HTTP:init(args)
 	self.block = args.block
 	-- use blocking by default.
 	-- I had some trouble with blocking and MathJax on android.  Maybe it was my imagination.
-	if self.block == nil then self.block = false end
+	if self.block == nil then self.block = true end
 	self:log(1, "blocking? "..tostring(self.block))
 
 	if self.block then
