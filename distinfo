@@ -1,0 +1,18 @@
+--------------------------------------------
+-- generated with dist/build-distinfo.rua --
+--------------------------------------------
+
+name = "http"
+files = {
+	["README.md"] = "http/README.md",
+	["class.lua"] = "http/class.lua",
+	["example.lua"] = "http/example.lua",
+	["http-dev-1.rockspec"] = "http/http-dev-1.rockspec",
+	["http.lua"] = "http/http.lua",
+	["lhttp.bat"] = "http/lhttp.bat",
+}
+deps = {
+	"ext",
+	"template",
+	"threadmanager",
+}
