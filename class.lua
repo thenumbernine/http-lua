@@ -8,8 +8,8 @@ local class = require 'ext.class'
 local string = require 'ext.string'
 local tolua = require 'ext.tolua'
 local template = require 'template'
+local URL = require 'url'
 local socket = require'socket'
-local url = require 'socket.url'
 local http = require 'socket.http'
 local MIMETypes = require 'mimetypes'
 local ThreadManager = require 'threadmanager'
@@ -269,7 +269,7 @@ function HTTP:makeGETTable(GET)
 	return string.split(GET or '', '&'):map(function(kv, _, t)
 		local k, v = kv:match('([^=]*)=(.*)')
 		if not v then k,v = kv, #t+1 end
-		k, v = url.unescape(k), url.unescape(v)
+		k, v = URL.unescape(k), URL.unescape(v)
 		return v, k
 	end)
 end
@@ -544,10 +544,10 @@ function HTTP:handleClient(client)
 						-- plusses are already encoded as %2B, right?
 						-- because it looks like jQuery ajax() POST is replacing ' ' with '+'
 						k = k:gsub('+', ' ')
-						k = url.unescape(k)
+						k = URL.unescape(k)
 						if type(v) == 'string' then
 							v = v:gsub('+', ' ')
-							v = url.unescape(v)
+							v = URL.unescape(v)
 						end
 						self:log(10, 'after unescape, k='..k..' v='..v)
 						return v, k
@@ -615,7 +615,7 @@ function HTTP:handleClient(client)
 
 		self:log(3, "about to handleRequest with "..tolua{GET=GET, POST=POST})
 
-		filename = url.unescape(filename:gsub('%+','%%20'))
+		filename = URL.unescape(filename:gsub('%+','%%20'))
 		local base, GET = filename:match('(.-)%?(.*)')
 		filename = base or filename
 		if not filename then
