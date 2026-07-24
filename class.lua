@@ -270,12 +270,8 @@ end
 
 function HTTP:makeGETTable(GET)
 	if not GET then return {} end
-	return string.split(GET or '', '&'):map(function(kv, _, t)
-		local k, v = kv:match('([^=]*)=(.*)')
-		if not v then k,v = kv, #t+1 end
-		k, v = URL.unescape(k), URL.unescape(v)
-		return v, k
-	end)
+	-- this will return [k]=v and [i]={k,v}
+	return URL.parseArgs(GET)
 end
 
 function HTTP:handleFile(
