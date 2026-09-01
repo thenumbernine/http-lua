@@ -632,6 +632,8 @@ function HTTP:handleClient(client)
 				POST
 			)
 
+			-- TODO what to do if we get back error that the socket is closed ...
+			-- ... try again ...
 			assert(self:send(client, 'HTTP/1.1 '..status..'\r\n'))
 			for k,v in pairs(headers) do
 				assert(self:send(client, k..': '..v..'\r\n'))
