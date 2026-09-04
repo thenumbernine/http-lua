@@ -25,7 +25,11 @@ local print = print
 
 local HTTP = class()
 
+-- whether to return directory listing pages
 HTTP.enableDirectoryListing = true
+
+-- whether to look for index.html when requesting directory
+HTTP.enableIndexFile = true
 
 --[[
 args:
@@ -235,7 +239,7 @@ end
 -- headers is modifyable
 function HTTP:handleDirectory(
 	filename,
-	localfilename,
+	localfilepath,
 	headers
 )
 print('self.enableDirectoryListing', self.enableDirectoryListing)
@@ -247,7 +251,7 @@ print('self.enableDirectoryListing', self.enableDirectoryListing)
 	return '200 OK', coroutine.wrap(function()
 
 		local files = table()
-		for f in path(localfilename):dir() do
+		for f in localfilename:dir() do
 			if f.path ~= '.' then
 				files:insert(f.path)
 			end
@@ -260,7 +264,7 @@ print('self.enableDirectoryListing', self.enableDirectoryListing)
 				{
 					path = path,
 					files = files,
-					localfilename = localfilename,
+					localfilename = localfilepath.path,
 					filename = filename,
 				}
 			)
@@ -276,7 +280,7 @@ end
 
 function HTTP:handleFile(
 	filename,
-	localfilename,
+	localfilepath,
 	ext,
 	dir,
 	headers,
@@ -284,11 +288,9 @@ function HTTP:handleFile(
 	GET,
 	POST
 )
-	local localfilepath = path(localfilename)
-
 	local result = localfilepath:read()
 	if not result then
-		self:log(1, 'from dir '..path:cwd()..' failed to read file at', localfilename)
+		self:log(1, 'from dir '..path:cwd()..' failed to read file at', localfilepath)
 		return '403 Forbidden', coroutine.wrap(function()
 			coroutine.yield('failed to read file '..filename)
 		end)
@@ -317,7 +319,7 @@ function HTTP:handleFile(
 				DOCUMENT_ROOT = self.docroot,
 				--SERVER_NAME = os.getenv'HOSTNAME',
 				SERVER_NAME = 'localhost', --os.getenv'HOSTNAME',
-				SCRIPT_FILENAME = localfilename,
+				SCRIPT_FILENAME = localfilepath.path,
 				GET = self:makeGETTable(GET),
 				POST = POST,
 			},
@@ -342,7 +344,7 @@ function HTTP:handleFile(
 		end
 
 		local sandboxenv = setmetatable({}, {__index=_ENV})
-		local f, err = load(result, localfilename, 'bt', sandboxenv)
+		local f, err = load(result, localfilepath.path, 'bt', sandboxenv)
 		if not f then
 			io.stderr:write(require 'template.showcode'(result),'\n')
 			error(err)
@@ -355,7 +357,7 @@ function HTTP:handleFile(
 			-- wsapi variables:
 			DOCUMENT_ROOT = self.docroot,
 			SERVER_NAME = 'localhost', --os.getenv'HOSTNAME',
-			SCRIPT_FILENAME = localfilename,
+			SCRIPT_FILENAME = localfilepath.path,
 		}
 		for k,v in pairs(headers2) do
 			k = k:lower()
@@ -397,13 +399,28 @@ function HTTP:handleRequest(...)
 	for _,searchdir in ipairs(self:getSearchPaths()) do
 		self:log(1, "searching in dir "..searchdir)
 
-		local localfilename = (searchdir..'/'..filename):gsub('/+', '/')
-		local localfilepath = path(localfilename)
+		local localfilepath = path((
+			(searchdir..'/'..filename):gsub('/+', '/')
+		))
 		local attr = localfilepath.attr and localfilepath:attr()
 		if attr then
 			if attr.mode == 'directory' then
-				self:log(1, 'serving directory',filename)
-				return self:handleDirectory(filename, localfilename, headers)
+				-- use indexes?
+				-- TODO search multiple options...
+				local foundIndex
+				if self.enableIndexFile then
+					local indexpath = localfilepath/'index.html'
+					if indexpath:exists() then	-- ...and it is a file and not a dir?
+						foundIndex = true
+						localfilepath = indexpath
+					end
+				end
+
+				-- if we found index then fall through to serving the file
+				if not foundIndex then
+					self:log(1, 'serving directory',filename)
+					return self:handleDirectory(filename, localfilepath, headers)
+				end
 			end
 
 			-- handle file:
@@ -414,7 +431,7 @@ function HTTP:handleRequest(...)
 
 			return self:handleFile(
 				filename,
-				localfilename,
+				localfilepath,
 				ext,
 				dirforfile.path,
 				headers,
@@ -423,7 +440,7 @@ function HTTP:handleRequest(...)
 				POST
 			)
 		else
-			self:log(1, 'from searchdir '..searchdir..' failed to find file at', localfilename)
+			self:log(1, 'from searchdir '..searchdir..' failed to find file at', localfilepath)
 		end
 	end
 
