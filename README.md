@@ -21,7 +21,7 @@
 
 make sure your `LUA_PATH` points to the directory containing http.lua (and the lua-ext and lua-csv projects it depends on) and run:
 
-`lua /path/to/http/run.lua`
+`lua -lhttp.run`
 
 
 alternatively you can explicitly invoke the file via:
@@ -37,7 +37,7 @@ and copy the lhttp.bat file to some executable directory and use:
 
 to set the port manually (defaults to 8000):
 
-`lua -e "port=80" /path/to/http/run.lua`
+`lua -e "port=80" -lhttp.run`
 
 `lua path/to/http/http.lua port=80`
 
@@ -46,19 +46,19 @@ to set the port manually (defaults to 8000):
 
 to set the interface manually (defaults to `*`, which sometimes doesn't work):
 
-`lua -e "addr='10.0.0.1'" /path/to/http/run.lua`
+`lua -e "addr='10.0.0.1'" -lhttp.run`
 
 
 to use non-blocking clients:
 
-`lua -e "block=false" /path/to/http/run.lua`
+`lua -e "block=false" -lhttp.run`
 
 
 wsapi simulation is enabled by default
 
 to disable wsapi simulation:
 
-`lua -e "wsapi=false" /path/to/http/run.lua`
+`lua -e "wsapi=false" -lhttp.run`
 
 ### Lua Class Arguments
 
