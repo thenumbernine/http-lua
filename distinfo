@@ -5,11 +5,11 @@
 name = "http"
 files = {
 	"README.md",
-	"class.lua",
 	"distinfo",
 	"example.lua",
-	"http-dev-1.rockspec",
 	"http.lua",
+	"http-dev-1.rockspec",
+	"run.lua",
 	"lhttp.bat",
 }
 deps = {

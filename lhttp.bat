@@ -5,11 +5,12 @@ rem luarocks is going to install the rockspec wherever it does,
 rem and LUAHTTP_DIR is only used in this batch file at the moment, for the standalone webserver,
 rem so if LUAHTTP_DIR isn't defined, just assume luarocks is, and try to find lua-http's directory
 
+rem TODO just find run dir of script ... can windows .bat do that?
 if not defined LUAHTTP_DIR (
 	echo LUAHTTP_DIR was not defined.
 	call :assignDirEnvVar
 ) else (
-	if not exist %LUAHTTP_DIR%\http.lua (
+	if not exist %LUAHTTP_DIR%\run.lua (
 		echo LUAHTTPDIR is set to a bad location: %LUAHTTP_DIR%
 		call :assignDirEnvVar
 	)
@@ -17,7 +18,7 @@ if not defined LUAHTTP_DIR (
 
 
 echo starting...
-lua %LUAHTTP_DIR%\http.lua %*
+lua %LUAHTTP_DIR%\run.lua %*
 echo this line should be unreachable, because by defeault batch files bail immediately after calls
 
 
@@ -31,10 +32,10 @@ echo this line should be unreachable, because by defeault batch files bail immed
 	for /f "usebackq" %%i in (`lua -lext -e "print((io.getfiledir(package.searchpath('http', package.path):gsub(os.sep, '/')):gsub('/', os.sep)))"`) do set LUAHTTP_DIR=%%i
 	echo set LUAHTTP_DIR to %LUAHTTP_DIR%
 
-	if not exist %LUAHTTP_DIR%\http.lua (
+	if not exist %LUAHTTP_DIR%\run.lua (
 		echo failed to search for LUAHTTP_DIR
 		echo exiting...
 		exit /b 1
 	)
-	
+
 	exit /b 0
