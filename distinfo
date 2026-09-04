@@ -3,17 +3,20 @@
 --------------------------------------------
 
 name = "http"
+git = "https://github.com/thenumbernine/http-lua.git"
+
 files = {
 	"README.md",
 	"distinfo",
 	"example.lua",
-	"http.lua",
 	"http-dev-1.rockspec",
-	"run.lua",
+	"http.lua",
 	"lhttp.bat",
+	"run.lua",
 }
 deps = {
 	"ext",
+	"mimetypes",
 	"template",
 	"threadmanager",
 	"url",
