@@ -12,12 +12,7 @@ local URL = require 'url'
 local MIMETypes = require 'mimetypes'
 local ThreadManager = require 'threadmanager'
 local json = require 'dkjson'
--- [[ luasocket
 local socket = require'socket'
---]]
---[[ TODO CapsAdmins' pure-luajit socket
-local socket = require'ljsocket'.socket
---]]
 
 
 -- bcuz of a subclass that's hacking global print ...
