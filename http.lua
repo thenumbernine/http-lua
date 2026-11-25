@@ -327,11 +327,9 @@ print('self.allowUpload', self.allowUpload)
 	then
 		local pf = POST.file
 		if pf then
-			local fn = assert.index(pf, 'filename', "got POST.file without POST.file.filename")
-			local body = assert.index(pf, 'body', "got POST.file without POST.file.body")
 			-- use POST.name (form name) or POST.filename (original filename) ?
-			local f = localfilepath/fn
-			assert(f:write(body))
+			-- just move the temp file.  meh.
+			assert(pf.path:move(localfilepath/pf.filename))
 		end
 	end
 
@@ -731,77 +729,57 @@ function HTTP:handleClient(client)
 					if sofar == '--' then
 						assert.eq(readChunk(2), '\r\n')
 					else
+--[[ k what we need here ...
+parsing expects:
+- boundary
+- \r\n
+- line of key:value;key=value;key=value etc ended with \r\n
+-  ... etc
+- \r\n
+- body until boundary is hit again
+--]]
+
 						-- set sofar to nil when we're done
 						-- boundaries delineate the beginning and end of the whole file.
 						local function readUntil(sep)
+							if not sofar then return end
+							local where = sofar:find(sep, 1, true)
+							if where then
+								local part = sofar:sub(1, where-1)
+								sofar = sofar:sub(where + #sep)
+								return part
+							end
+
 							local chunk = readChunk()
 							if not chunk then	-- done
-								if not sofar then return end
 								local x = sofar
 								sofar = nil
 								return x
 							end
 
-							local where = chunk:find(sep, 1, true)
-							if not where then
-								sofar = sofar .. chunk
-								return readUntil(sep)
-							end
-
-							local part = sofar..chunk:sub(1, where-1)
-							sofar = chunk:sub(where + #sep)
-							return part
-						end
-
-						local function readBoundary()
-							local result = readUntil(boundary)
-							if not result then return end
-							if not sofar then
-								if self.loglevel >= 5 then
-									self:log(5, 'read last POST boundary, sized', #result)
-								end
-							else
-								if self.loglevel >= 5 then
-									self:log(5, 'read POST boundary part size', #result)
-								end
-							end
-							return result
+							sofar = sofar .. chunk
+							return readUntil(sep)
 						end
 
 						-- read until next boundary
 						-- between boundaries, read one line at a time, separated by \r\n
 						-- after the last boundary is just '--\r\n'
 						--
-						local nextFormInputData = readBoundary()
 						POST = {}
 						while true do
-							local formInputData = nextFormInputData
-							nextFormInputData = readBoundary()
-
-							if self.loglevel >= 10 then
-								self:log(10, 'form-data part:')
-								self:log(10, formInputData)
-							end
-							local lines = string.split(formInputData, '\r\n')
-							--self:log(10, tolua(lines))
-							if not nextFormInputData then
-								assert.eq(lines[1], '--')
-								assert.eq(lines[2], '')
-								assert.len(lines, 2)
-								break
-							end
-							assert.eq(lines:remove(1), '')
+							local line = readUntil'\r\n'
+							assert.eq(line, '')
 
 							-- then do another header-read here with k:v; .. kinda with some optional stuff too ...
 							-- who thinks this stupid standard up? we have some k:v, some k=v, ...some bullshit
 							local thisPostVar = {}
-							while lines[1] ~= nil and lines[1] ~= '' do
+							local line
+							while true do
+								line = readUntil'\r\n'
+								self:log(5, 'reading vars line', tolua(line))
+								if line == '' then break end
 								-- in here is all the important stuff:
-								local nextline = lines:remove(1)
-								if self.loglevel >= 10 then
-									self:log(10, "next line:\n"..nextline)
-								end
-								local splits = string.split(nextline, ';')
+								local splits = string.split(line, ';')
 								for i,split in ipairs(splits) do
 									split = string.trim(split)
 									-- order probably matters
@@ -817,18 +795,32 @@ function HTTP:handleClient(client)
 											error("failed to parse POST form-data line "..split)
 										end
 									end
+									self:log(3, 'setting current post var '..tostring(k)..' to '..tostring(v))
 									thisPostVar[k:lower()] = string.trim(v)
 								end
 							end
-							assert.ne(lines[1], nil, "removed too many lines in our form-part data")
-							assert.eq(lines:remove(1), '')
-							assert.eq(lines:remove(), '')
-							local data = lines:concat'\r\n'
+
+							-- now the rest until the final boundary is the data
+
+							local data = readUntil('\r\n'..boundary)
+
+							-- TODO this doesn't work in windows last i checked
+							local tmppath = path(os.tmpname())
+							assert(tmppath:write(data))
 
 							self:log(3, 'setting post var '..tostring(thisPostVar.name)..' to data len '..#data)
 							POST[thisPostVar.name] = thisPostVar
-							POST[thisPostVar.name].body = data
+							POST[thisPostVar.name].path = tmppath
+
+							-- after boundary is --\r\n if it's done, or just \r\n if there's more
+							local lineAfterBoundary = readUntil'\r\n'
+							if lineAfterBoundary == '--' then break end
+							assert.eq(lineAfterBoundary, '')
 						end
+
+						self:log(5, 'done with upload parsing')
+						self:log(5, 'remaining bytes: ', bytesRemaining)
+						self:log(5, 'sofar chunkreader:', #sofar, 'contents:', sofar)
 					end
 				else
 					self:log(1, "what to do with post and our content-type "..tostring(contentType))
