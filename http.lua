@@ -229,7 +229,9 @@ console.log('uploading', file);
 					const progressBar = document.createElement('progress');
 					progressBar.max = 100;
 					progressBar.value = 0;
-					wrapper.appendChild(document.createTextNode(file.name));
+					const filenameSpan = document.createElement('span');
+					filenameSpan.innerText = file.name;
+					wrapper.appendChild(filenameSpan);
 					wrapper.appendChild(progressBar);
 					wrapper.appendChild(document.createElement('br'));
 
@@ -245,6 +247,22 @@ console.log('uploading', file);
 						if (!e.lengthComputable) return;
 						progressBar.value = Math.round((e.loaded / e.total) * 100);
 console.log(file, progressBar.value+'%:', e.loaded, 'of', e.total);
+					};
+
+					xhr.onload = (e) => {
+						if (xhr.status >= 200 && xhr.status < 300) {
+							console.log(file, 'success');
+							filenameSpan.innerText += ' DONE!';
+							wrapper.removeChild(progressBar);
+						} else {
+							wrapper.appendChild(document.createTextNode('upload failed: '+xhr.status));
+							wrapper.appendChild(document.createElement('br'));
+							console.error('upload server returned an error:', xhr.status);
+						}
+					};
+
+					xhr.onerror = (e) => {
+						console.error('upload failed');
 					};
 
 					xhr.send(form);
