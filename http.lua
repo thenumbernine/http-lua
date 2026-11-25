@@ -278,7 +278,12 @@ end
 function HTTP:handleDirectory(
 	filename,
 	localfilepath,
-	headers
+	headers,
+	reqHeaders,
+	method,
+	proto,
+	GET,
+	POST
 )
 print('self.enableDirectoryListing', self.enableDirectoryListing)
 	if not self.enableDirectoryListing then
@@ -286,6 +291,19 @@ print('self.enableDirectoryListing', self.enableDirectoryListing)
 	end
 
 print('self.allowUpload', self.allowUpload)
+	if self.allowUpload
+	and method == 'post'
+	and POST
+	then
+		local pf = POST.file
+		if pf then
+			local fn = assert.index(pf, 'filename', "got POST.file without POST.file.filename")
+			local body = assert.index(pf, 'body', "got POST.file without POST.file.body")
+			-- use POST.name (form name) or POST.filename (original filename) ?
+			local f = localfilepath/fn
+			assert(f:write(body))
+		end
+	end
 
 	headers['content-type'] = 'text/html'
 	return '200 OK', coroutine.wrap(function()
@@ -460,7 +478,16 @@ function HTTP:handleRequest(...)
 				-- if we found index then fall through to serving the file
 				if not foundIndex then
 					self:log(1, 'serving directory',filename)
-					return self:handleDirectory(filename, localfilepath, headers)
+					return self:handleDirectory(
+						filename,
+						localfilepath,
+						headers,
+						reqHeaders,
+						method,
+						proto,
+						GET,
+						POST
+					)
 				end
 			end
 
@@ -576,7 +603,7 @@ function HTTP:handleClient(client)
 			else
 				self:log(1, 'reading POST '..postLen..' bytes')
 				local postData = self:receive(client, postLen) or ''
-				self:log(1, 'read POST data: '..postData)
+				self:log(10, 'read POST data: '..postData)
 				local contentType = string.trim(reqHeaders['content-type'])
 				local contentTypeParts = string.split(contentType, ';'):mapi(function(s) return string.trim(s) end)
 				local contentTypePartsMap = {}	-- first one is the content-type, rest are key=value
@@ -621,9 +648,9 @@ function HTTP:handleClient(client)
 					POST = {}
 					while #parts > 0 do
 						local formInputData = parts:remove(1)
-						self:log(2, 'form-data part:\n'..formInputData)
+						self:log(10, 'form-data part:\n'..formInputData)
 						local lines = string.split(formInputData, '\r\n')
-						self:log(3, tolua(lines))
+						self:log(10, tolua(lines))
 						if #parts == 0 then
 							assert.eq(lines[1], '--')
 							assert.eq(lines[2], '')
@@ -637,7 +664,7 @@ function HTTP:handleClient(client)
 						while lines[1] ~= nil and lines[1] ~= '' do
 							-- in here is all the important stuff:
 							local nextline = lines:remove(1)
-							self:log(2, "next line:\n"..nextline)
+							self:log(10, "next line:\n"..nextline)
 							local splits = string.split(nextline, ';')
 							for i,split in ipairs(splits) do
 								split = string.trim(split)
@@ -675,7 +702,8 @@ function HTTP:handleClient(client)
 			error("unknown method: "..method)
 		end
 
-		self:log(3, "about to handleRequest with "..tolua{GET=GET, POST=POST})
+		-- 10 loglevel because it can have whole upload files in it...
+		self:log(10, "about to handleRequest with "..tolua{GET=GET, POST=POST})
 
 		filename = URL.unescape(filename:gsub('%+','%%20'))
 		local base, GET = filename:match('(.-)%?(.*)')
