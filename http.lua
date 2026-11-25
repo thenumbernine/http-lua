@@ -623,9 +623,35 @@ function HTTP:handleClient(client)
 			if not postLen then
 				self:log(0, "didn't get POST data length")
 			else
+				-- TODO if post is big (like too big for a string, like 2gb...)
+				-- then I will want to parse POST fields as I go
+				-- and also redirect the POST file contents to a temp disk location ...
 				self:log(1, 'reading POST '..postLen..' bytes')
-				local postData = self:receive(client, postLen) or ''
-				self:log(10, 'read POST data: '..postData)
+
+				local bytesRemaining = postLen
+
+				local readBufferSize = 65536
+				local function readChunk(requestSize)
+					if remaining == 0 then return '' end
+					requestSize = requestSize or readBufferSize
+					chunkSize = math.min(requestSize, bytesRemaining)
+					local chunk = self:receive(client, chunkSize) or ''
+					self:log(10, 'read POST chunk:')
+					self:log(10, chunk)
+					-- should I assert #chunk == chunkSize?
+					-- should I only consider #chunk?
+					bytesRemaining = bytesRemaining - #chunk
+					return chunk
+				end
+
+				local function readRemaining()
+					local postData = self:receive(client, bytesRemaining) or ''
+					self:log(10, 'read POST data:')
+					self:log(10, postData)
+					bytesRemaining = bytesRemaining - #postData
+					return postData
+				end
+
 				local contentType = string.trim(reqHeaders['content-type'])
 				local contentTypeParts = string.split(contentType, ';'):mapi(function(s) return string.trim(s) end)
 				local contentTypePartsMap = {}	-- first one is the content-type, rest are key=value
@@ -643,10 +669,15 @@ function HTTP:handleClient(client)
 						contentTypePartsMap[k] = v
 					end
 				end
+
 				if contentTypeParts[1] == 'application/json' then
+					-- let's hope that the JSON is small enough...
+					local postData = readRemaining()
 					POST = json.decode(postData)
 				elseif contentTypeParts[1] == 'application/x-www-form-urlencoded' then
 					self:log(2, "splitting up post...")
+					-- will these be small?  just a bunch of key=value's ...
+					local postData = readRemaining()
 					POST = string.split(postData, '&'):mapi(function(kv, _, t)
 						local k, v = kv:match'([^=]*)=(.*)'
 						if not v then k,v = kv, #t+1 end
@@ -664,9 +695,20 @@ function HTTP:handleClient(client)
 						return v, k
 					end)
 				elseif contentTypeParts[1] == 'multipart/form-data' then
-					local boundary = contentTypePartsMap.boundary
-					local parts = string.split(postData, string.patescape('--'..boundary))
-					assert.eq(parts:remove(1), '')
+					local boundary = '--'..contentTypePartsMap.boundary
+					local firstBoundary = readChunk(#boundary)
+					assert.eq(firstBoundary, boundary)
+
+					-- this might be big...
+					-- TODO read until you find boundary and then yield with what is between it
+					-- but then ending too ...
+					local postData = readRemaining()
+					local parts = string.split(postData, string.patescape(boundary))
+
+					-- read until next boundary
+					-- between boundaries, read one line at a time, separated by \r\n
+					-- after the last boundary is just '--\r\n'
+					--
 					POST = {}
 					while #parts > 0 do
 						local formInputData = parts:remove(1)
@@ -710,12 +752,14 @@ function HTTP:handleClient(client)
 						assert.eq(lines:remove(1), '')
 						assert.eq(lines:remove(), '')
 						local data = lines:concat'\r\n'
+
 						self:log(3, 'setting post var '..tostring(thisPostVar.name)..' to data len '..#data)
 						POST[thisPostVar.name] = thisPostVar
 						POST[thisPostVar.name].body = data
 					end
 				else
 					self:log(1, "what to do with post and our content-type "..tostring(contentType))
+					local postData = readRemaining()
 					POST = postData
 				end
 			end
