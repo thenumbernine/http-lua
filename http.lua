@@ -644,19 +644,22 @@ function HTTP:handleClient(client)
 
 				-- read a chunk from the `postLen` bytes remaining
 				-- returns nil if all bytes have been read
-				local readBufferSize = 65536
+				--local readBufferSize = 65536
+				local readBufferSize = 262144
 				local function readChunk(requestSize)
 					if bytesRemaining == 0 then return end
 					requestSize = requestSize or readBufferSize
 					chunkSize = math.min(requestSize, bytesRemaining)
 					local chunk = self:receive(client, chunkSize) or ''	-- why `or ''` ?
-					if self.loglevel >= 10 then
-						self:log(10, 'read POST chunk:', chunk)
-					end
 					-- should I assert #chunk == chunkSize?
 					-- should I only consider #chunk?
 					-- will luasocket do any string modifications to mess up my byte count?
 					bytesRemaining = bytesRemaining - #chunk
+					if self.loglevel >= 10 then
+						self:log(10, 'read POST chunk:', chunk)
+					elseif self.loglevel >= 5 then
+						self:log(5, 'read POST chunk size', #chunk, 'remaining', bytesRemaining)
+					end
 					return chunk
 				end
 
@@ -722,87 +725,110 @@ function HTTP:handleClient(client)
 
 					local firstBoundary = readChunk(#boundary) or error("post data didn't even have the boundary string")
 					assert.eq(firstBoundary, boundary)
-
-					local sofar = ''	-- set to nil when we're done
-					local function readBoundary()
-						local chunk = readChunk()
-						if not chunk then	-- done
-							if not sofar then return end
-							local x = sofar
-							sofar = nil
-							return x
-						end
-
-						local where = chunk:find(boundary, 1, true)
-						if not where then
-							sofar = sofar .. chunk
-							return readBoundary()
-						end
-
-						local part = sofar..chunk:sub(1, where-1)
-						sofar = chunk:sub(where + #boundary)
-						return part
-					end
-
-					-- read until next boundary
-					-- between boundaries, read one line at a time, separated by \r\n
-					-- after the last boundary is just '--\r\n'
-					--
-					local nextFormInputData = readBoundary()
-					POST = {}
-					while true do
-						local formInputData = nextFormInputData
-						nextFormInputData = readBoundary()
-
-						if self.loglevel >= 10 then
-							self:log(10, 'form-data part:\n')
-							self:log(10, formInputData)
-						end
-						local lines = string.split(formInputData, '\r\n')
-						--self:log(10, tolua(lines))
-						if not nextFormInputData then
-							assert.eq(lines[1], '--')
-							assert.eq(lines[2], '')
-							assert.len(lines, 2)
-							break
-						end
-						assert.eq(lines:remove(1), '')
-						-- then do another header-read here with k:v; .. kinda with some optional stuff too ...
-						-- who thinks this stupid standard up? we have some k:v, some k=v, ...some bullshit
-						local thisPostVar = {}
-						while lines[1] ~= nil and lines[1] ~= '' do
-							-- in here is all the important stuff:
-							local nextline = lines:remove(1)
-							if self.loglevel >= 10 then
-								self:log(10, "next line:\n"..nextline)
+					-- next comes '--\r\n' if we're through,
+					-- or just '\r\n' if there's more
+					local sofar = readChunk(2)
+					if sofar == '--' then
+						assert.eq(readChunk(2), '\r\n')
+					else
+						-- set sofar to nil when we're done
+						-- boundaries delineate the beginning and end of the whole file.
+						local function readUntil(sep)
+							local chunk = readChunk()
+							if not chunk then	-- done
+								if not sofar then return end
+								local x = sofar
+								sofar = nil
+								return x
 							end
-							local splits = string.split(nextline, ';')
-							for i,split in ipairs(splits) do
-								split = string.trim(split)
-								-- order probably matters
-								local k, v
-								if i == 1 then
-									k, v = split:match'([^:]*):(.*)$'
-									if k == nil or v == nil then
-										error("failed to parse POST form-data line "..split)
-									end
-								else
-									k, v = split:match'([^=]*)="(.*)"$'
-									if k == nil or v == nil then
-										error("failed to parse POST form-data line "..split)
-									end
+
+							local where = chunk:find(sep, 1, true)
+							if not where then
+								sofar = sofar .. chunk
+								return readUntil(sep)
+							end
+
+							local part = sofar..chunk:sub(1, where-1)
+							sofar = chunk:sub(where + #sep)
+							return part
+						end
+
+						local function readBoundary()
+							local result = readUntil(boundary)
+							if not result then return end
+							if not sofar then
+								if self.loglevel >= 5 then
+									self:log(5, 'read last POST boundary, sized', #result)
 								end
-								thisPostVar[k:lower()] = string.trim(v)
+							else
+								if self.loglevel >= 5 then
+									self:log(5, 'read POST boundary part size', #result)
+								end
 							end
+							return result
 						end
-						assert.ne(lines[1], nil, "removed too many lines in our form-part data")
-						assert.eq(lines:remove(1), '')
-						assert.eq(lines:remove(), '')
-						local data = lines:concat'\r\n'
 
-						self:log(3, 'setting post var '..tostring(thisPostVar.name)..' to data len '..#data)
-						POST[thisPostVar.name] = thisPostVar
-						POST[thisPostVar.name].body = data
+						-- read until next boundary
+						-- between boundaries, read one line at a time, separated by \r\n
+						-- after the last boundary is just '--\r\n'
+						--
+						local nextFormInputData = readBoundary()
+						POST = {}
+						while true do
+							local formInputData = nextFormInputData
+							nextFormInputData = readBoundary()
+
+							if self.loglevel >= 10 then
+								self:log(10, 'form-data part:')
+								self:log(10, formInputData)
+							end
+							local lines = string.split(formInputData, '\r\n')
+							--self:log(10, tolua(lines))
+							if not nextFormInputData then
+								assert.eq(lines[1], '--')
+								assert.eq(lines[2], '')
+								assert.len(lines, 2)
+								break
+							end
+							assert.eq(lines:remove(1), '')
+
+							-- then do another header-read here with k:v; .. kinda with some optional stuff too ...
+							-- who thinks this stupid standard up? we have some k:v, some k=v, ...some bullshit
+							local thisPostVar = {}
+							while lines[1] ~= nil and lines[1] ~= '' do
+								-- in here is all the important stuff:
+								local nextline = lines:remove(1)
+								if self.loglevel >= 10 then
+									self:log(10, "next line:\n"..nextline)
+								end
+								local splits = string.split(nextline, ';')
+								for i,split in ipairs(splits) do
+									split = string.trim(split)
+									-- order probably matters
+									local k, v
+									if i == 1 then
+										k, v = split:match'([^:]*):(.*)$'
+										if k == nil or v == nil then
+											error("failed to parse POST form-data line "..split)
+										end
+									else
+										k, v = split:match'([^=]*)="(.*)"$'
+										if k == nil or v == nil then
+											error("failed to parse POST form-data line "..split)
+										end
+									end
+									thisPostVar[k:lower()] = string.trim(v)
+								end
+							end
+							assert.ne(lines[1], nil, "removed too many lines in our form-part data")
+							assert.eq(lines:remove(1), '')
+							assert.eq(lines:remove(), '')
+							local data = lines:concat'\r\n'
+
+							self:log(3, 'setting post var '..tostring(thisPostVar.name)..' to data len '..#data)
+							POST[thisPostVar.name] = thisPostVar
+							POST[thisPostVar.name].body = data
+						end
 					end
 				else
 					self:log(1, "what to do with post and our content-type "..tostring(contentType))
