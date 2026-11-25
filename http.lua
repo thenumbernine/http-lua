@@ -212,13 +212,17 @@ function HTTP:handleDirectoryTemplate()
 	<body>
 		<h3>Index of <?=filename?></h3>
 <? if allowUpload then ?>
-		<input type="file" id="fileInput"/>
 		<div id="progressBarWrapper"/>
 		<span id="statusText">0%</span>
 		<script>
-			const input = document.getElementById('fileInput');
-			const statusText = document.getElementById('statusText');
 			const wrapper = document.getElementById('progressBarWrapper');
+			const input = document.createElement('input');
+			input.type = 'file';
+			input.multiple = true;
+			input.required = true;
+			wrapper.appendChild(input);
+
+			const statusText = document.getElementById('statusText');
 			input.addEventListener('change', () => {
 				for (const file of input.files) {
 console.log('uploading', file);
@@ -229,8 +233,8 @@ console.log('uploading', file);
 					wrapper.appendChild(progressBar);
 					wrapper.appendChild(document.createElement('br'));
 
-					const formData = new FormData();
-					formData.append('file', file);
+					const form = new FormData();
+					form.append('file', file);
 
 					const xhr = new XMLHttpRequest();
 					const url = '<?=filename?>';	// TODO dir ...
@@ -243,7 +247,7 @@ console.log('uploading', file);
 console.log(file, progressBar.value+'%:', e.loaded, 'of', e.total);
 					};
 
-					xhr.send(formData);
+					xhr.send(form);
 				}
 			});
 		</script>
