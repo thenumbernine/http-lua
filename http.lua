@@ -1,6 +1,7 @@
 --[[
 This is starting to have a lot in common with 'websocket'
 --]]
+local assert = require 'ext.assert'
 local path = require 'ext.path'
 local table = require 'ext.table'
 local os = require 'ext.os'
@@ -26,6 +27,9 @@ HTTP.enableDirectoryListing = true
 -- whether to look for index.html when requesting directory
 HTTP.enableIndexFile = true
 
+-- whether to allow file uploads in the directory listing
+HTTP.allowUpload = true
+
 --[[
 args:
 	addr = address to bind to, default *
@@ -41,6 +45,7 @@ args:
 	threads = (optional) ThreadManager.  if you provide one then you have to update it manually.
 	allowFrom = (optional) string of what addresses to allow connections from, uses Lua pattern matching.
 	enableDirectoryListing = (optional) set to 'false' to disable, otherwise default is 'true'
+	allowUpload = allow file uploading on the directory-listing page.
 --]]
 function HTTP:init(args)
 	args = args or {}
@@ -51,6 +56,7 @@ function HTTP:init(args)
 	self.loglevel = args.log or 0	-- TODO replace with ext.debug ?
 	self.allowFrom = args.allowFrom
 	self.enableDirectoryListing = args.enableDirectoryListing
+	self.allowUpload = args.allowUpload
 
 	self.servers = table()
 	local boundaddr, boundport
@@ -111,7 +117,7 @@ function HTTP:init(args)
 	else
 		-- [[
 		for _,server in ipairs(self.servers) do
-			assert(server:settimeout(0,'b'))
+			assert(server:settimeout(0, 'b'))
 		end
 		--]]
 	end
@@ -155,7 +161,7 @@ function HTTP:send(conn, data)
 		self:log(10, conn, '...', successlen, reason, faillen, time)
 		self:log(10, conn, '...getstats()', conn:getstats())
 		if successlen ~= nil then
-			assert(reason ~= 'wantwrite')	-- will wantwrite get set only if res[1] is nil?
+			assert.ne(reason, 'wantwrite')	-- will wantwrite get set only if res[1] is nil?
 			self:log(10, conn, '...done sending')
 			return successlen, reason, faillen, time
 		end
@@ -182,7 +188,7 @@ function HTTP:findDontInterpret(docroot, remotePath)
 	local docrootparts = string.split(docroot, '/')
 	local dirparts = string.split(dir.path, '/')
 	for i=1,#docrootparts do
-		assert(docrootparts[i] == dirparts[i])
+		assert.eq(docrootparts[i], dirparts[i])
 	end
 	for i=#dirparts,#docrootparts,-1 do
 		local check = table.concat({table.unpack(dirparts,1,i)}, '/')..'/.dontinterpret'
@@ -205,6 +211,43 @@ function HTTP:handleDirectoryTemplate()
 	</head>
 	<body>
 		<h3>Index of <?=filename?></h3>
+<? if allowUpload then ?>
+		<input type="file" id="fileInput"/>
+		<div id="progressBarWrapper"/>
+		<span id="statusText">0%</span>
+		<script>
+			const input = document.getElementById('fileInput');
+			const statusText = document.getElementById('statusText');
+			const wrapper = document.getElementById('progressBarWrapper');
+			input.addEventListener('change', () => {
+				for (const file of input.files) {
+console.log('uploading', file);
+					const progressBar = document.createElement('progress');
+					progressBar.max = 100;
+					progressBar.value = 0;
+					wrapper.appendChild(document.createTextNode(file.name));
+					wrapper.appendChild(progressBar);
+					wrapper.appendChild(document.createElement('br'));
+
+					const formData = new FormData();
+					formData.append('file', file);
+
+					const xhr = new XMLHttpRequest();
+					const url = '<?=filename?>';	// TODO dir ...
+					console.log("opening upload at url", url);
+					xhr.open('POST', url);
+
+					xhr.upload.onprogress = (e) => {
+						if (!e.lengthComputable) return;
+						progressBar.value = Math.round((e.loaded / e.total) * 100);
+console.log(file, progressBar.value+'%:', e.loaded, 'of', e.total);
+					};
+
+					xhr.send(formData);
+				}
+			});
+		</script>
+<? end ?>
 		<table>
 			<tr>
 				<th>Name</th>
@@ -213,7 +256,7 @@ function HTTP:handleDirectoryTemplate()
 			</tr>
 <? for _,f in ipairs(files) do
 	local displayfile = f
-	local subpath = path(localfilepath..'/'..f)
+	local subpath = localfilepath/f
 	local subattr = subpath.attr and subpath:attr()
 	if subattr and subattr.mode == 'directory' then
 		displayfile = '[' .. displayfile .. ']'
@@ -242,6 +285,8 @@ print('self.enableDirectoryListing', self.enableDirectoryListing)
 		return '404 Not Found', coroutine.wrap(function() end)
 	end
 
+print('self.allowUpload', self.allowUpload)
+
 	headers['content-type'] = 'text/html'
 	return '200 OK', coroutine.wrap(function()
 
@@ -259,8 +304,9 @@ print('self.enableDirectoryListing', self.enableDirectoryListing)
 				{
 					path = path,
 					files = files,
-					localfilepath = localfilepath.path,
+					localfilepath = localfilepath,
 					filename = filename,
+					allowUpload = self.allowUpload,
 				}
 			)
 		)
@@ -534,11 +580,15 @@ function HTTP:handleClient(client)
 				local contentType = string.trim(reqHeaders['content-type'])
 				local contentTypeParts = string.split(contentType, ';'):mapi(function(s) return string.trim(s) end)
 				local contentTypePartsMap = {}	-- first one is the content-type, rest are key=value
-				for _,part in ipairs(contentTypeParts) do
+				for i=#contentTypeParts,1,-1 do
+					local part = contentTypeParts[i]
 					local k, v = part:match'([^=]*)=(.*)'
 					if not k then
-						self:log(0, 'got unknown contentType part '..part)
+						--self:log(0, 'got unknown contentType part '..part)
+						-- then just keep it there
+						-- is the 1st always not a k=v?
 					else
+						contentTypeParts:remove(i)
 						k = string.trim(k):lower()	-- case-insensitive right?
 						v = string.trim(v)
 						contentTypePartsMap[k] = v
@@ -567,7 +617,7 @@ function HTTP:handleClient(client)
 				elseif contentTypeParts[1] == 'multipart/form-data' then
 					local boundary = contentTypePartsMap.boundary
 					local parts = string.split(postData, string.patescape('--'..boundary))
-					assert(parts:remove(1) == '')
+					assert.eq(parts:remove(1), '')
 					POST = {}
 					while #parts > 0 do
 						local formInputData = parts:remove(1)
@@ -575,12 +625,12 @@ function HTTP:handleClient(client)
 						local lines = string.split(formInputData, '\r\n')
 						self:log(3, tolua(lines))
 						if #parts == 0 then
-							assert(lines[1] == '--')
-							assert(lines[2] == '')
-							assert(#lines == 2)
+							assert.eq(lines[1], '--')
+							assert.eq(lines[2], '')
+							assert.len(lines, 2)
 							break
 						end
-						assert(lines:remove(1) == '')
+						assert.eq(lines:remove(1), '')
 						-- then do another header-read here with k:v; .. kinda with some optional stuff too ...
 						-- who thinks this stupid standard up? we have some k:v, some k=v, ...some bullshit
 						local thisPostVar = {}
@@ -607,9 +657,9 @@ function HTTP:handleClient(client)
 								thisPostVar[k:lower()] = string.trim(v)
 							end
 						end
-						assert(lines[1] ~= nil, "removed too many lines in our form-part data")
-						assert(lines:remove(1) == '')
-						assert(lines:remove() == '')
+						assert.ne(lines[1], nil, "removed too many lines in our form-part data")
+						assert.eq(lines:remove(1), '')
+						assert.eq(lines:remove(), '')
 						local data = lines:concat'\r\n'
 						self:log(3, 'setting post var '..tostring(thisPostVar.name)..' to data len '..#data)
 						POST[thisPostVar.name] = thisPostVar
@@ -697,8 +747,8 @@ function HTTP:connectCoroutine(client, server)
 			mode = 'server',
 			options = {'all'},
 			protocol = 'any',
-			key = assert(self.keyfile),
-			certificate = assert(self.certfile),
+			key = assert.index(self, 'keyfile'),
+			certificate = assert.index(self, 'certfile'),
 			password = '12345',
 			ciphers = 'ALL:!ADH:@STRENGTH',
 		}))
