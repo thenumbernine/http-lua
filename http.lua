@@ -213,7 +213,7 @@ function HTTP:handleDirectoryTemplate()
 			</tr>
 <? for _,f in ipairs(files) do
 	local displayfile = f
-	local subpath = path(localfilename..'/'..f)
+	local subpath = path(localfilepath..'/'..f)
 	local subattr = subpath.attr and subpath:attr()
 	if subattr and subattr.mode == 'directory' then
 		displayfile = '[' .. displayfile .. ']'
@@ -246,7 +246,7 @@ print('self.enableDirectoryListing', self.enableDirectoryListing)
 	return '200 OK', coroutine.wrap(function()
 
 		local files = table()
-		for f in localfilename:dir() do
+		for f in localfilepath:dir() do
 			if f.path ~= '.' then
 				files:insert(f.path)
 			end
@@ -259,7 +259,7 @@ print('self.enableDirectoryListing', self.enableDirectoryListing)
 				{
 					path = path,
 					files = files,
-					localfilename = localfilepath.path,
+					localfilepath = localfilepath.path,
 					filename = filename,
 				}
 			)
