@@ -151,15 +151,19 @@ function HTTP:init(args)
 end
 
 function HTTP:send(conn, data)
-	self:log(10, conn, '<<', tolua(data))
+	if self.loglevel >= 10 then
+		self:log(10, conn, '<<', tolua(data))
+	end
 	local i = 1
 	while true do
 		-- conn:send() successful response will be numberBytesSent, nil, nil, time
 		-- conn:send() failed response will be nil, 'wantwrite', numBytesSent, time
 		-- socket.send lets you use i,j as substring args, but does luasec's ssl.wrap?
 		local successlen, reason, faillen, time = conn:send(data:sub(i))
-		self:log(10, conn, '...', successlen, reason, faillen, time)
-		self:log(10, conn, '...getstats()', conn:getstats())
+		if self.loglevel >= 10 then
+			self:log(10, conn, '...', successlen, reason, faillen, time)
+			self:log(10, conn, '...getstats()', conn:getstats())
+		end
 		if successlen ~= nil then
 			assert.ne(reason, 'wantwrite')	-- will wantwrite get set only if res[1] is nil?
 			self:log(10, conn, '...done sending')
@@ -171,7 +175,7 @@ function HTTP:send(conn, data)
 		--socket.select({conn}, nil)	-- not good?
 		-- try again
 		i = i + faillen
-		self:log(10, conn, 'sending from offset '..i)
+		self:log(10, conn, 'sending from offset', i)
 		coroutine.yield()
 	end
 end
@@ -182,7 +186,9 @@ function HTTP:log(level, ...)
 end
 
 function HTTP:findDontInterpret(docroot, remotePath)
-	self:log(10, "looking for dontinterpret at docroot='"..docroot.."' remotePath='"..remotePath.."'")
+	if self.loglevel >= 10 then
+		self:log(10, "looking for dontinterpret at docroot='"..docroot.."' remotePath='"..remotePath.."'")
+	end
 	local localPath = docroot .. remotePath
 	local dir = path(localPath):getdir()
 	local docrootparts = string.split(docroot, '/')
@@ -192,7 +198,9 @@ function HTTP:findDontInterpret(docroot, remotePath)
 	end
 	for i=#dirparts,#docrootparts,-1 do
 		local check = table.concat({table.unpack(dirparts,1,i)}, '/')..'/.dontinterpret'
-		self:log(10, "checking file '"..check.."'")
+		if self.loglevel >= 10 then
+			self:log(10, "checking file '"..check.."'")
+		end
 		if path(check):exists() then
 			self:log(10, "found .dontinterpret")
 			return true
@@ -556,8 +564,10 @@ function HTTP:receive(conn, amount, waitduration)
 	repeat
 		local reason
 		data, reason = conn:receive(amount)
-		self:log(10, conn, '...', data, reason)
-		self:log(10, conn, '...getstats()', conn:getstats())
+		if self.loglevel >= 10 then
+			self:log(10, conn, '...', data, reason)
+			self:log(10, conn, '...getstats()', conn:getstats())
+		end
 		if reason == 'wantread' then
 			-- can we have data AND wantread?
 			assert(not data, "FIXME I haven't considered wantread + already-read data")
@@ -567,7 +577,9 @@ function HTTP:receive(conn, amount, waitduration)
 			-- and try again
 		else
 			if data then
-				self:log(10, conn, '>>', tolua(data))
+				if self.loglevel >= 10 then
+					self:log(10, conn, '>>', tolua(data))
+				end
 				return data
 			end
 			if reason ~= 'timeout' then
@@ -630,24 +642,30 @@ function HTTP:handleClient(client)
 
 				local bytesRemaining = postLen
 
+				-- read a chunk from the `postLen` bytes remaining
+				-- returns nil if all bytes have been read
 				local readBufferSize = 65536
 				local function readChunk(requestSize)
-					if remaining == 0 then return '' end
+					if bytesRemaining == 0 then return end
 					requestSize = requestSize or readBufferSize
 					chunkSize = math.min(requestSize, bytesRemaining)
-					local chunk = self:receive(client, chunkSize) or ''
-					self:log(10, 'read POST chunk:')
-					self:log(10, chunk)
+					local chunk = self:receive(client, chunkSize) or ''	-- why `or ''` ?
+					if self.loglevel >= 10 then
+						self:log(10, 'read POST chunk:', chunk)
+					end
 					-- should I assert #chunk == chunkSize?
 					-- should I only consider #chunk?
+					-- will luasocket do any string modifications to mess up my byte count?
 					bytesRemaining = bytesRemaining - #chunk
 					return chunk
 				end
 
 				local function readRemaining()
+					if bytesRemaining == 0 then return end
 					local postData = self:receive(client, bytesRemaining) or ''
-					self:log(10, 'read POST data:')
-					self:log(10, postData)
+					if self.loglevel >= 10 then
+						self:log(10, 'read POST data:', postData)
+					end
 					bytesRemaining = bytesRemaining - #postData
 					return postData
 				end
@@ -672,16 +690,18 @@ function HTTP:handleClient(client)
 
 				if contentTypeParts[1] == 'application/json' then
 					-- let's hope that the JSON is small enough...
-					local postData = readRemaining()
+					local postData = readRemaining() or ''
 					POST = json.decode(postData)
 				elseif contentTypeParts[1] == 'application/x-www-form-urlencoded' then
 					self:log(2, "splitting up post...")
 					-- will these be small?  just a bunch of key=value's ...
-					local postData = readRemaining()
+					local postData = readRemaining() or ''
 					POST = string.split(postData, '&'):mapi(function(kv, _, t)
 						local k, v = kv:match'([^=]*)=(.*)'
 						if not v then k,v = kv, #t+1 end
-						self:log(10, 'before unescape, k='..k..' v='..v)
+						if self.loglevel >= 10 then
+							self:log(10, 'before unescape, k='..k..' v='..v)
+						end
 
 						-- plusses are already encoded as %2B, right?
 						-- because it looks like jQuery ajax() POST is replacing ' ' with '+'
@@ -691,31 +711,56 @@ function HTTP:handleClient(client)
 							v = v:gsub('+', ' ')
 							v = URL.unescape(v)
 						end
-						self:log(10, 'after unescape, k='..k..' v='..v)
+						if self.loglevel >= 10 then
+							self:log(10, 'after unescape, k='..k..' v='..v)
+						end
 						return v, k
 					end)
 				elseif contentTypeParts[1] == 'multipart/form-data' then
 					local boundary = '--'..contentTypePartsMap.boundary
-					local firstBoundary = readChunk(#boundary)
+					local patescapeBoundary = string.patescape(boundary)
+
+					local firstBoundary = readChunk(#boundary) or error("post data didn't even have the boundary string")
 					assert.eq(firstBoundary, boundary)
 
-					-- this might be big...
-					-- TODO read until you find boundary and then yield with what is between it
-					-- but then ending too ...
-					local postData = readRemaining()
-					local parts = string.split(postData, string.patescape(boundary))
+					local sofar = ''	-- set to nil when we're done
+					local function readBoundary()
+						local chunk = readChunk()
+						if not chunk then	-- done
+							if not sofar then return end
+							local x = sofar
+							sofar = nil
+							return x
+						end
+
+						local where = chunk:find(boundary, 1, true)
+						if not where then
+							sofar = sofar .. chunk
+							return readBoundary()
+						end
+
+						local part = sofar..chunk:sub(1, where-1)
+						sofar = chunk:sub(where + #boundary)
+						return part
+					end
 
 					-- read until next boundary
 					-- between boundaries, read one line at a time, separated by \r\n
 					-- after the last boundary is just '--\r\n'
 					--
+					local nextFormInputData = readBoundary()
 					POST = {}
-					while #parts > 0 do
-						local formInputData = parts:remove(1)
-						self:log(10, 'form-data part:\n'..formInputData)
+					while true do
+						local formInputData = nextFormInputData
+						nextFormInputData = readBoundary()
+
+						if self.loglevel >= 10 then
+							self:log(10, 'form-data part:\n')
+							self:log(10, formInputData)
+						end
 						local lines = string.split(formInputData, '\r\n')
-						self:log(10, tolua(lines))
-						if #parts == 0 then
+						--self:log(10, tolua(lines))
+						if not nextFormInputData then
 							assert.eq(lines[1], '--')
 							assert.eq(lines[2], '')
 							assert.len(lines, 2)
@@ -728,7 +773,9 @@ function HTTP:handleClient(client)
 						while lines[1] ~= nil and lines[1] ~= '' do
 							-- in here is all the important stuff:
 							local nextline = lines:remove(1)
-							self:log(10, "next line:\n"..nextline)
+							if self.loglevel >= 10 then
+								self:log(10, "next line:\n"..nextline)
+							end
 							local splits = string.split(nextline, ';')
 							for i,split in ipairs(splits) do
 								split = string.trim(split)
@@ -759,7 +806,7 @@ function HTTP:handleClient(client)
 					end
 				else
 					self:log(1, "what to do with post and our content-type "..tostring(contentType))
-					local postData = readRemaining()
+					local postData = readRemaining() or ''
 					POST = postData
 				end
 			end
@@ -769,7 +816,9 @@ function HTTP:handleClient(client)
 		end
 
 		-- 10 loglevel because it can have whole upload files in it...
-		self:log(10, "about to handleRequest with "..tolua{GET=GET, POST=POST})
+		if self.loglevel >= 10 then
+			self:log(10, "about to handleRequest with "..tolua{GET=GET, POST=POST})
+		end
 
 		filename = URL.unescape(filename:gsub('%+','%%20'))
 		local base, GET = filename:match('(.-)%?(.*)')
