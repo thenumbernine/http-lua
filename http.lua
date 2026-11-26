@@ -9,12 +9,17 @@ local class = require 'ext.class'
 local string = require 'ext.string'
 local tolua = require 'ext.tolua'
 local template = require 'template'
+local showcode = require 'template.showcode'
 local URL = require 'url'
 local MIMETypes = require 'mimetypes'
 local ThreadManager = require 'threadmanager'
 local json = require 'dkjson'
 local socket = require'socket'
 
+--local readBufferSize = 65536
+--local readBufferSize = 262144
+local readBufferSize = 1048576
+local writeBufferSize = 1048576
 
 -- bcuz of a subclass that's hacking global print ...
 local print = print
@@ -159,7 +164,7 @@ function HTTP:send(conn, data)
 		-- conn:send() successful response will be numberBytesSent, nil, nil, time
 		-- conn:send() failed response will be nil, 'wantwrite', numBytesSent, time
 		-- socket.send lets you use i,j as substring args, but does luasec's ssl.wrap?
-		local successlen, reason, faillen, time = conn:send(data:sub(i))
+		local successlen, reason, faillen, time = conn:send(data, i, i+readBufferSize-1)
 		if self.loglevel >= 10 then
 			self:log(10, conn, '...', successlen, reason, faillen, time)
 			self:log(10, conn, '...getstats()', conn:getstats())
@@ -375,8 +380,7 @@ function HTTP:handleFile(
 	GET,
 	POST
 )
-	local result = localfilepath:read()
-	if not result then
+	if not localfilepath:exists() then
 		self:log(1, 'from dir '..path:cwd()..' failed to read file at', localfilepath)
 		return '403 Forbidden', coroutine.wrap(function()
 			coroutine.yield('failed to read file '..filename)
@@ -400,6 +404,13 @@ function HTTP:handleFile(
 		assert(path(dir):cd())
 		headers['content-type'] = self.mime.types[ext2]
 
+		local result, msg = localfilepath:read()
+		if not result then
+			self:log(0, "failed to read file "..localfilepath..": "..tostring(msg))
+			return '403 Forbidden', coroutine.wrap(function()
+				coroutine.yield('failed to read file '..filename)
+			end)
+		end
 		local processed = template(result, {
 			headers = headers,	-- TODO what a more conventional way to pass templated lua pages the header table?
 			env = {
@@ -426,6 +437,13 @@ function HTTP:handleFile(
 		assert(path(dir):cd())
 
 		-- trim off the linux executable stuff that lua interpreter usually does for me
+		local result, msg = localfilepath:read()
+		if not result then
+			self:log(0, "failed to read file "..localfilepath..": "..tostring(msg))
+			return '403 Forbidden', coroutine.wrap(function()
+				coroutine.yield('failed to read file '..filename)
+			end)
+		end
 		if result:sub(1,2) == '#!' then
 			result = result:match'^[^\n]*\n(.*)$'
 		end
@@ -433,7 +451,7 @@ function HTTP:handleFile(
 		local sandboxenv = setmetatable({}, {__index=_ENV})
 		local f, err = load(result, localfilepath.path, 'bt', sandboxenv)
 		if not f then
-			io.stderr:write(require 'template.showcode'(result),'\n')
+			io.stderr:write(showcode(result),'\n')
 			error(err)
 		end
 		local fn = assert((f()))
@@ -456,9 +474,24 @@ function HTTP:handleFile(
 
 	self:log(1, 'serving file', filename)
 	headers['content-type'] = ext and self.mime.types[ext:lower()] or 'application/octet-stream'
-	headers['content-length'] = #result
+	local f, msg = localfilepath:open'rb'
+	if not f then
+		self:log(0, "failed to read file "..localfilepath..": "..tostring(msg))
+		return '403 Forbidden', coroutine.wrap(function()
+			coroutine.yield('failed to read file '..filename)
+		end)
+	end
+	local attr = localfilepath.attr and localfilepath:attr()
+	if attr then
+		headers['content-length'] = attr.size
+	end
 	return '200 OK', coroutine.wrap(function()
-		coroutine.yield(result)
+		while true do
+			local r = f:read(readBufferSize)
+			if not r then break end
+			self:log(5, 'send read file chunk size', #r)
+			coroutine.yield(r)
+		end
 	end)
 end
 
@@ -642,12 +675,9 @@ function HTTP:handleClient(client)
 
 				-- read a chunk from the `postLen` bytes remaining
 				-- returns nil if all bytes have been read
-				--local readBufferSize = 65536
-				--local readBufferSize = 262144
-				local readBufferSize = 1048576
 				local function readChunk(requestSize)
 					if bytesRemaining == 0 then return end
-					requestSize = requestSize or readBufferSize
+					requestSize = requestSize or writeBufferSize
 					chunkSize = math.min(requestSize, bytesRemaining)
 					local chunk = self:receive(client, chunkSize) or ''	-- why `or ''` ?
 					-- should I assert #chunk == chunkSize?
