@@ -643,7 +643,8 @@ function HTTP:handleClient(client)
 				-- read a chunk from the `postLen` bytes remaining
 				-- returns nil if all bytes have been read
 				--local readBufferSize = 65536
-				local readBufferSize = 262144
+				--local readBufferSize = 262144
+				local readBufferSize = 1048576
 				local function readChunk(requestSize)
 					if bytesRemaining == 0 then return end
 					requestSize = requestSize or readBufferSize
@@ -739,6 +740,45 @@ parsing expects:
 - body until boundary is hit again
 --]]
 
+						--[[ why wasn't this working, while the inlined version did work?
+						local function iterUntil(sep)
+							return coroutine.wrap(function()
+								if not sofar then return end	-- already finished
+
+								local where = sofar:find(sep, 1, true)
+								if where then
+									coroutine.yield(sofar:sub(1, where-1))
+									sofar = sofar:sub(where + #sep)
+									return
+								end
+
+								while true do
+									local chunk = readChunk()
+									if not chunk then	-- done
+										coroutine.yield(sofar)
+										sofar = nil
+										return
+									end
+
+									-- check boundary between chunks
+									local combined = sofar .. chunk
+									local where = combined:find(sep, 1, true)
+									if where then
+										coroutine.yield(combined:sub(1, where-1))
+										sofar = combined:sub(where + #sep)
+										return
+									end
+
+									-- sep wasn't in prev two chunks so
+									-- yield the last chunk and swap it with the current
+									coroutine.yield(sofar)
+									sofar = chunk
+								end
+							end)
+						end
+						--]]
+
+
 						-- set sofar to nil when we're done
 						-- boundaries delineate the beginning and end of the whole file.
 						local function readUntil(sep)
@@ -768,7 +808,7 @@ parsing expects:
 						POST = {}
 						while true do
 							local line = readUntil'\r\n'
-							assert.eq(line, '')
+							if line ~= '' then error("expected empty new line!") end
 
 							-- then do another header-read here with k:v; .. kinda with some optional stuff too ...
 							-- who thinks this stupid standard up? we have some k:v, some k=v, ...some bullshit
@@ -802,20 +842,73 @@ parsing expects:
 
 							-- now the rest until the final boundary is the data
 
-							local data = readUntil('\r\n'..boundary)
-
 							-- TODO this doesn't work in windows last i checked
 							local tmppath = path(os.tmpname())
-							assert(tmppath:write(data))
+							local f = assert(tmppath:open'wb')
+							--[[ buffer all then write
+							local data = readUntil('\r\n'..boundary)
+							local dataLen = #data
+							assert(f:write(data))
+							--]]
+							--[[ write while we go
+							local dataLen = 0
+							for chunk in iterUntil('\r\n'..boundary) do
+print('writing chunk size', #chunk)
+								dataLen = dataLen + #chunk
+								assert(f:write(chunk))
+							end
+							--]]
+							-- [[ inlined cuz the iter function is not working
+							assert(sofar, "can't write data, no data")
+							local dataLen = 0
+							local sep = '\r\n'..boundary
+							local where = sofar:find(sep, 1, true)
+							if where then
+								local part = sofar:sub(1, where-1)
+								dataLen = dataLen + #part
+								f:write(part)
+								sofar = sofar:sub(where + #sep)
+							else
+								while true do
+									local chunk = readChunk()
+									if not chunk then	-- done
+										dataLen = dataLen + #sofar
+										f:write(sofar)
+										sofar = nil
+										break
+									end
 
-							self:log(3, 'setting post var '..tostring(thisPostVar.name)..' to data len '..#data)
+									-- check boundary between chunks
+									local combined = sofar .. chunk
+									local where = combined:find(sep, 1, true)
+									if where then
+										local part = combined:sub(1, where-1)
+										dataLen = dataLen + #part
+										f:write(part)
+										sofar = combined:sub(where + #sep)
+										break
+									end
+
+									-- sep wasn't in prev two chunks so
+									-- yield the last chunk and swap it with the current
+									dataLen = dataLen + #sofar
+									f:write(sofar)
+									sofar = chunk
+								end
+							end
+
+							--]]
+							f:close()
+
+
+							self:log(3, 'setting post var '..tostring(thisPostVar.name)..' to data len '..dataLen)
 							POST[thisPostVar.name] = thisPostVar
 							POST[thisPostVar.name].path = tmppath
 
 							-- after boundary is --\r\n if it's done, or just \r\n if there's more
 							local lineAfterBoundary = readUntil'\r\n'
 							if lineAfterBoundary == '--' then break end
-							assert.eq(lineAfterBoundary, '')
+							if lineAfterBoundary ~= '' then error("expected empty newline!") end
 						end
 
 						self:log(5, 'done with upload parsing')
